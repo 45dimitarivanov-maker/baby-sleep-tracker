@@ -124,15 +124,16 @@
     cursor: pointer;
     margin-top: 4px;
   }
-  /* Time picker (hour / min / am-pm dropdowns) */
-  .time-select { display: flex; gap: 5px; align-items: center; }
-  .time-select select {
-    flex: 1; min-width: 0; padding: 12px 6px; text-align: center;
-    font-size: 16px; font-weight: 600; -webkit-appearance: none; appearance: none;
-    background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>") no-repeat right 6px center;
-    padding-right: 18px;
+  /* Time input (free-text HH:MM, 24h) */
+  .time-select { display: flex; }
+  .time-select input {
+    flex: 1; min-width: 0; width: 100%; box-sizing: border-box;
+    padding: 12px 10px; text-align: center; font-size: 18px; font-weight: 700;
+    letter-spacing: 1px; border: 1px solid var(--line); border-radius: 8px;
+    font-family: inherit; color: var(--ink);
   }
-  .time-select .colon { font-weight: 800; color: var(--muted); }
+  .time-select input:focus { outline: none; border-color: var(--primary); }
+  .time-select input.invalid { border-color: var(--danger); background: #fff5f5; }
   /* Date nav */
   .date-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
   .date-nav button {
@@ -287,7 +288,7 @@
       <textarea id="notesInput" rows="2" placeholder="e.g. fussy before sleep, teething, woke crying…"></textarea>
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
-    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 20:00 → 6:00), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
+    <div class="hint">Just type the time in 24-hour format, e.g. <b>14:32</b> (afternoon) or <b>9:05</b> (morning). Night sleep that crosses midnight (e.g. 20:00 → 6:00) is calculated automatically.</div>
   </div>
 
   <!-- Sleep log for the day -->
@@ -406,47 +407,62 @@ function escapeHtml(str) {
   ));
 }
 
-// ---------- Time picker (24-hour: hour 0-23 / minute dropdowns) ----------
-const MIN_STEP = 5;
+// ---------- Time input (free-text 24-hour "HH:MM") ----------
 
-// Build 2 dropdowns into a container. hhmm optional (24h "HH:MM") to preselect.
-function buildTimePicker(containerId, idPrefix, hhmm) {
-  let h24 = null, min = null;
-  if (hhmm) { const p = hhmm.split(':').map(Number); h24 = p[0]; min = p[1]; }
-  // snap minutes to nearest step for the dropdown
-  const minSnapped = min == null ? '' : Math.round(min / MIN_STEP) * MIN_STEP % 60;
-
-  let hourOpts = '<option value="" disabled ' + (h24 == null ? 'selected' : '') + '>–</option>';
-  for (let i = 0; i < 24; i++) {
-    const lbl = String(i).padStart(2, '0');
-    hourOpts += `<option value="${i}" ${i === h24 ? 'selected' : ''}>${lbl}</option>`;
+// Parse loose user text into "HH:MM" (24h) or null.
+// Accepts: "14:32", "1432", "9:5", "9", "930", "9.30", "9 30".
+function parseTime(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  s = s.replace(/[.\s]/g, ':');           // treat "." and spaces like ":"
+  let h, m;
+  if (s.includes(':')) {
+    const p = s.split(':');
+    h = parseInt(p[0], 10);
+    m = p[1] === '' || p[1] == null ? 0 : parseInt(p[1], 10);
+  } else {
+    const digits = s.replace(/\D/g, '');
+    if (digits.length <= 2) { h = parseInt(digits, 10); m = 0; }          // "9" -> 09:00
+    else if (digits.length === 3) { h = parseInt(digits.slice(0, 1), 10); m = parseInt(digits.slice(1), 10); } // "930" -> 9:30
+    else { h = parseInt(digits.slice(0, 2), 10); m = parseInt(digits.slice(2, 4), 10); } // "1432" -> 14:32
   }
-
-  let minOpts = '<option value="" disabled ' + (minSnapped === '' ? 'selected' : '') + '>–</option>';
-  for (let i = 0; i < 60; i += MIN_STEP) {
-    const lbl = String(i).padStart(2, '0');
-    minOpts += `<option value="${i}" ${i === minSnapped ? 'selected' : ''}>${lbl}</option>`;
-  }
-
-  document.getElementById(containerId).innerHTML = `
-    <select id="${idPrefix}-h" aria-label="Hour (24h)">${hourOpts}</select>
-    <span class="colon">:</span>
-    <select id="${idPrefix}-m" aria-label="Minute">${minOpts}</select>`;
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
-// Read a picker back to "HH:MM" (24h). Returns null if hour/minute not chosen.
+// Build a single free-text time input into a container.
+// hhmm optional (24h "HH:MM") to prefill.
+function buildTimePicker(containerId, idPrefix, hhmm) {
+  const val = hhmm ? fmtTime(hhmm) : '';
+  document.getElementById(containerId).innerHTML =
+    `<input type="text" id="${idPrefix}-t" inputmode="numeric" maxlength="5"
+       placeholder="--:--" value="${val}" aria-label="Time (24h, HH:MM)"
+       autocomplete="off">`;
+  const el = document.getElementById(idPrefix + '-t');
+  // On leaving the field, normalise valid text to "HH:MM"; flag invalid entries.
+  el.addEventListener('blur', () => {
+    const t = parseTime(el.value);
+    if (el.value.trim() === '') { el.classList.remove('invalid'); return; }
+    if (t) { el.value = t; el.classList.remove('invalid'); }
+    else { el.classList.add('invalid'); }
+  });
+  el.addEventListener('input', () => el.classList.remove('invalid'));
+}
+
+// Read an input back to "HH:MM" (24h). Returns null if empty/invalid.
 function readTimePicker(idPrefix) {
-  const h = document.getElementById(idPrefix + '-h').value;
-  const m = document.getElementById(idPrefix + '-m').value;
-  if (h === '' || m === '') return null;
-  return String(Number(h)).padStart(2, '0') + ':' + String(Number(m)).padStart(2, '0');
+  const el = document.getElementById(idPrefix + '-t');
+  if (!el) return null;
+  return parseTime(el.value);
 }
 
 function setTimePicker(idPrefix, hhmm) {
-  const [h24, m] = hhmm.split(':').map(Number);
-  const mSnap = Math.round(m / MIN_STEP) * MIN_STEP % 60;
-  document.getElementById(idPrefix + '-h').value = String(h24);
-  document.getElementById(idPrefix + '-m').value = String(mSnap);
+  const el = document.getElementById(idPrefix + '-t');
+  if (!el) return;
+  el.value = fmtTime(hhmm);
+  el.classList.remove('invalid');
 }
 
 // Duration in minutes; if end <= start assume it crossed midnight (+24h)
@@ -822,17 +838,17 @@ render();
 // In Nap mode, when the start time is fully chosen and the end isn't set yet,
 // default the end to 1 hour after the start.
 function attachNapAutofill() {
-  ['start-h', 'start-m'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => {
-      if (currentType !== 'day') return;
-      const start = readTimePicker('start');
-      if (!start) return;
-      if (readTimePicker('end')) return; // don't overwrite a value the user set
-      const [h, m] = start.split(':').map(Number);
-      const endMins = (h * 60 + m + 60) % (24 * 60);
-      const eh = Math.floor(endMins / 60), em = endMins % 60;
-      setTimePicker('end', String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0'));
-    });
+  const startEl = document.getElementById('start-t');
+  if (!startEl) return;
+  startEl.addEventListener('change', () => {
+    if (currentType !== 'day') return;
+    const start = readTimePicker('start');
+    if (!start) return;
+    if (readTimePicker('end')) return; // don't overwrite a value the user set
+    const [h, m] = start.split(':').map(Number);
+    const endMins = (h * 60 + m + 60) % (24 * 60);
+    const eh = Math.floor(endMins / 60), em = endMins % 60;
+    setTimePicker('end', String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0'));
   });
 }
 </script>
