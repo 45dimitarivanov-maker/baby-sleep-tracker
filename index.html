@@ -204,14 +204,42 @@
   .edit-actions { display: flex; gap: 8px; }
   .edit-actions .btn { flex: 1; padding: 9px; font-size: 14px; }
   /* Statistics */
-  .period-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
-  .period-tabs button {
-    flex: 1; min-width: 60px; padding: 8px 6px; border-radius: 8px;
-    border: 1px solid var(--line); background: #fff; font-weight: 600;
-    font-size: 13px; cursor: pointer; font-family: inherit; color: var(--muted);
+  .period-slider { margin-bottom: 16px; }
+  .slider-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .slider-head > span:first-child { font-weight: 600; font-size: 13px; color: var(--muted); }
+  .slider-val { font-weight: 700; font-size: 15px; color: var(--primary); }
+  .period-slider input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
+    border-radius: 6px; background: var(--line); outline: none; cursor: pointer;
   }
-  .period-tabs button.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .period-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--primary); cursor: pointer; border: 3px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .period-slider input[type="range"]::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--primary);
+    cursor: pointer; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .slider-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
   .stat-sub-note { font-size: 12px; color: var(--muted); margin-top: 12px; text-align: center; }
+  /* Notes + interruption stepper */
+  textarea {
+    width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-family: inherit; font-size: 14px; resize: vertical; color: var(--ink);
+  }
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .stepper button {
+    width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--line);
+    background: #fff; font-size: 20px; font-weight: 700; cursor: pointer; color: var(--ink);
+    line-height: 1; font-family: inherit;
+  }
+  .stepper input {
+    width: 64px; text-align: center; height: 38px; border: 1px solid var(--line);
+    border-radius: 8px; font-family: inherit; font-size: 15px; font-weight: 600; color: var(--ink);
+  }
+  .sleep-note { font-size: 12px; color: var(--muted); margin-top: 3px; font-style: italic; }
+  .sleep-interrupt { font-size: 11px; font-weight: 700; color: var(--night); }
   .empty { text-align: center; color: var(--muted); padding: 24px 12px; font-size: 14px; }
   .empty .emo { font-size: 32px; display: block; margin-bottom: 6px; }
   .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
@@ -225,6 +253,51 @@
 
 <div class="wrap">
   <div class="app-title"><span class="app-mark">🌙</span> Baby Sleep Tracker</div>
+
+  <!-- Quick add -->
+  <div class="card">
+    <h2>Add a sleep</h2>
+    <div class="type-toggle">
+      <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
+      <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
+    </div>
+    <div class="time-row">
+      <div class="field">
+        <label>Fell asleep</label>
+        <div class="time-select" id="startPick"></div>
+        <button class="now-btn" onclick="setNow('start')">Now</button>
+      </div>
+      <div class="field">
+        <label>Woke up</label>
+        <div class="time-select" id="endPick"></div>
+        <button class="now-btn" onclick="setNow('end')">Now</button>
+      </div>
+    </div>
+    <!-- Night-only: how many times sleep was interrupted -->
+    <div class="field" id="interruptWrap" style="display:none;margin-top:12px">
+      <label>Times interrupted during the night</label>
+      <div class="stepper">
+        <button type="button" onclick="bumpInterrupt(-1)">−</button>
+        <input type="number" id="interruptCount" min="0" step="1" value="0" inputmode="numeric">
+        <button type="button" onclick="bumpInterrupt(1)">+</button>
+      </div>
+    </div>
+    <div class="field" style="margin-top:12px">
+      <label id="notesLabel">Notes (optional)</label>
+      <textarea id="notesInput" rows="2" placeholder="e.g. fussy before sleep, teething, woke crying…"></textarea>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
+    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 20:00 → 6:00), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
+  </div>
+
+  <!-- Sleep log for the day -->
+  <div class="card">
+    <div class="card-head">
+      <h2>Sleep log</h2>
+      <button class="btn-sm" id="copyYesterdayBtn" onclick="copyFromYesterday()">📋 Copy from yesterday</button>
+    </div>
+    <div id="sleepList"></div>
+  </div>
 
   <!-- Daily dashboard (Today's summary) -->
   <div class="card">
@@ -256,46 +329,16 @@
     </div>
   </div>
 
-  <!-- Quick add -->
-  <div class="card">
-    <h2>Add a sleep</h2>
-    <div class="type-toggle">
-      <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
-      <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
-    </div>
-    <div class="time-row">
-      <div class="field">
-        <label>Fell asleep</label>
-        <div class="time-select" id="startPick"></div>
-        <button class="now-btn" onclick="setNow('start')">Now</button>
-      </div>
-      <div class="field">
-        <label>Woke up</label>
-        <div class="time-select" id="endPick"></div>
-        <button class="now-btn" onclick="setNow('end')">Now</button>
-      </div>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
-    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 8:00 PM → 6:00 AM), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
-  </div>
-
-  <!-- Sleep log for the day -->
-  <div class="card">
-    <div class="card-head">
-      <h2>Sleep log</h2>
-      <button class="btn-sm" id="copyYesterdayBtn" onclick="copyFromYesterday()">📋 Copy from yesterday</button>
-    </div>
-    <div id="sleepList"></div>
-  </div>
-
   <!-- Statistics over a period -->
   <div class="card">
     <h2>Statistics</h2>
-    <div class="period-tabs" id="periodTabs">
-      <button data-days="3" onclick="setPeriod(3)">3 days</button>
-      <button data-days="7" class="active" onclick="setPeriod(7)">7 days</button>
-      <button data-days="14" onclick="setPeriod(14)">14 days</button>
-      <button data-days="30" onclick="setPeriod(30)">30 days</button>
+    <div class="period-slider">
+      <div class="slider-head">
+        <span>Trend period</span>
+        <span class="slider-val"><span id="periodVal">7</span> days</span>
+      </div>
+      <input type="range" id="periodRange" min="2" max="30" value="7" step="1" oninput="setPeriod(Number(this.value))">
+      <div class="slider-scale"><span>2</span><span>30</span></div>
     </div>
     <div class="stats-grid">
       <div class="stat total">
@@ -356,6 +399,12 @@ function fmtTime(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
+// Escape user-entered notes before inserting into HTML.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
 
 // ---------- Time picker (24-hour: hour 0-23 / minute dropdowns) ----------
 const MIN_STEP = 5;
@@ -414,6 +463,8 @@ function setType(t) {
   currentType = t;
   document.getElementById('tNight').classList.toggle('active', t === 'night');
   document.getElementById('tDay').classList.toggle('active', t === 'day');
+  // interruptions only make sense for night sleep
+  document.getElementById('interruptWrap').style.display = (t === 'night') ? 'block' : 'none';
   // switching to Nap: if a start is set but no end yet, default end to start + 1h
   if (t === 'day') {
     const start = readTimePicker('start');
@@ -431,6 +482,13 @@ function setNow(prefix) {
   setTimePicker(prefix, hhmm);
 }
 
+// +/- on the night-interruption counter (never below 0)
+function bumpInterrupt(delta) {
+  const el = document.getElementById('interruptCount');
+  const v = Math.max(0, (parseInt(el.value, 10) || 0) + delta);
+  el.value = v;
+}
+
 function addSleep() {
   const start = readTimePicker('start');
   const end = readTimePicker('end');
@@ -438,18 +496,27 @@ function addSleep() {
   const mins = durationMins(start, end);
   if (mins === 0) { alert('Start and end time are the same.'); return; }
 
+  const notes = document.getElementById('notesInput').value.trim();
+  const interruptions = currentType === 'night'
+    ? Math.max(0, parseInt(document.getElementById('interruptCount').value, 10) || 0)
+    : 0;
+
   const sleeps = loadSleeps();
   sleeps.push({
     id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
     date: viewDate,
     type: currentType,
     start, end,
-    mins
+    mins,
+    interruptions,
+    notes
   });
   saveSleeps(sleeps);
-  // reset pickers for quick next entry
+  // reset pickers + fields for quick next entry
   buildTimePicker('startPick', 'start', null);
   buildTimePicker('endPick', 'end', null);
+  document.getElementById('notesInput').value = '';
+  document.getElementById('interruptCount').value = '0';
   attachNapAutofill();
   render();
 }
@@ -475,7 +542,9 @@ function copyFromYesterday() {
       type: s.type,
       start: s.start,
       end: s.end,
-      mins: s.mins
+      mins: s.mins,
+      interruptions: s.interruptions || 0,
+      notes: s.notes || ''
     });
   });
   saveSleeps(all);
@@ -549,7 +618,11 @@ function render() {
             <div class="dot ${s.type}"></div>
             <div class="info">
               <div class="times">${fmtTime(s.start)} → ${fmtTime(s.end)}</div>
-              <div class="meta"><span class="badge ${s.type}">${s.type === 'night' ? '🌙 Night' : '☀️ Nap'}</span></div>
+              <div class="meta">
+                <span class="badge ${s.type}">${s.type === 'night' ? '🌙 Night' : '☀️ Nap'}</span>
+                ${(s.type === 'night' && s.interruptions > 0) ? `<span class="sleep-interrupt">· woke ${s.interruptions}×</span>` : ''}
+              </div>
+              ${s.notes ? `<div class="sleep-note">📝 ${escapeHtml(s.notes)}</div>` : ''}
             </div>
             <div class="dur">${fmtDur(s.mins)}</div>
             <button class="edit" onclick="startEdit('${s.id}')" title="Edit">✏️</button>
@@ -613,7 +686,7 @@ function editFormHtml(s) {
       <div class="er">
         <div class="field">
           <label>Type</label>
-          <select id="ed-type-${s.id}">
+          <select id="ed-type-${s.id}" onchange="toggleEditInterrupt('${s.id}')">
             <option value="night" ${s.type === 'night' ? 'selected' : ''}>🌙 Night</option>
             <option value="day" ${s.type === 'day' ? 'selected' : ''}>☀️ Nap</option>
           </select>
@@ -627,11 +700,33 @@ function editFormHtml(s) {
           <div class="time-select" id="edend-${s.id}"></div>
         </div>
       </div>
+      <div class="field" id="ed-interrupt-wrap-${s.id}" style="margin-top:10px;${s.type === 'night' ? '' : 'display:none'}">
+        <label>Times interrupted during the night</label>
+        <div class="stepper">
+          <button type="button" onclick="bumpEditInterrupt('${s.id}', -1)">−</button>
+          <input type="number" id="ed-interrupt-${s.id}" min="0" step="1" value="${s.interruptions || 0}" inputmode="numeric">
+          <button type="button" onclick="bumpEditInterrupt('${s.id}', 1)">+</button>
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Notes (optional)</label>
+        <textarea id="ed-notes-${s.id}" rows="2">${escapeHtml(s.notes || '')}</textarea>
+      </div>
       <div class="edit-actions">
         <button class="btn btn-primary" onclick="saveEdit('${s.id}')">Save</button>
         <button class="btn btn-ghost" onclick="cancelEdit()">Cancel</button>
       </div>
     </div>`;
+}
+
+// Show/hide interruption field in the edit form when the type changes
+function toggleEditInterrupt(id) {
+  const isNight = document.getElementById('ed-type-' + id).value === 'night';
+  document.getElementById('ed-interrupt-wrap-' + id).style.display = isNight ? 'block' : 'none';
+}
+function bumpEditInterrupt(id, delta) {
+  const el = document.getElementById('ed-interrupt-' + id);
+  el.value = Math.max(0, (parseInt(el.value, 10) || 0) + delta);
 }
 
 function startEdit(id) { editingId = id; render(); }
@@ -645,9 +740,14 @@ function saveEdit(id) {
   const mins = durationMins(start, end);
   if (mins === 0) { alert('Start and end time are the same.'); return; }
 
+  const notes = document.getElementById('ed-notes-' + id).value.trim();
+  const interruptions = type === 'night'
+    ? Math.max(0, parseInt(document.getElementById('ed-interrupt-' + id).value, 10) || 0)
+    : 0;
+
   const sleeps = loadSleeps();
   const s = sleeps.find(x => x.id === id);
-  if (s) { s.type = type; s.start = start; s.end = end; s.mins = mins; }
+  if (s) { s.type = type; s.start = start; s.end = end; s.mins = mins; s.interruptions = interruptions; s.notes = notes; }
   saveSleeps(sleeps);
   editingId = null;
   render();
@@ -656,9 +756,9 @@ function saveEdit(id) {
 // ---------- Statistics over a period ----------
 function setPeriod(days) {
   statPeriod = days;
-  document.querySelectorAll('#periodTabs button').forEach(b => {
-    b.classList.toggle('active', Number(b.dataset.days) === days);
-  });
+  document.getElementById('periodVal').textContent = days;
+  const range = document.getElementById('periodRange');
+  if (Number(range.value) !== days) range.value = days;
   renderStats();
 }
 
@@ -673,9 +773,10 @@ function renderStats() {
 
   let nightMins = 0, dayMins = 0, naps = 0;
   const daysWithData = new Set();
+  let interruptSum = 0, nightCount = 0;
   inRange.forEach(s => {
     daysWithData.add(s.date);
-    if (s.type === 'night') nightMins += s.mins;
+    if (s.type === 'night') { nightMins += s.mins; interruptSum += (s.interruptions || 0); nightCount++; }
     else { dayMins += s.mins; naps++; }
   });
   // Known awake time per day = sum of gaps between that day's logged sleeps.
@@ -703,7 +804,10 @@ function renderStats() {
 
   const note = document.getElementById('statNote');
   if (daysWithData.size) {
-    note.textContent = `Averaged over ${daysWithData.size} tracked ${daysWithData.size === 1 ? 'day' : 'days'} in the last ${statPeriod} days.`;
+    const avgInterrupt = nightCount ? Math.round((interruptSum / nightCount) * 10) / 10 : null;
+    let txt = `Averaged over ${daysWithData.size} tracked ${daysWithData.size === 1 ? 'day' : 'days'} in the last ${statPeriod} days.`;
+    if (avgInterrupt != null) txt += ` Avg night interruptions: ${avgInterrupt} per night.`;
+    note.textContent = txt;
   } else {
     note.textContent = `No data logged in the last ${statPeriod} days yet.`;
   }

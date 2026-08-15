@@ -10,7 +10,8 @@ A simple, single-file web app to track a baby's naps, night sleep, and awake tim
 - **Daily dashboard** — Total sleep, awake time, night sleep, and day naps for any day, with day-to-day navigation.
 - **Editable sleep log** — Edit or delete any logged sleep inline.
 - **Awake windows** — See how long the baby was awake between each consecutive sleep.
-- **Statistics** — Daily averages over the last 3 / 7 / 14 / 30 days.
+- **Night details** — Record how many times night sleep was interrupted, and add free-text notes to any nap or night sleep. Both show in the sleep log.
+- **Statistics** — Daily averages over a period you choose with a slider (2–30 days), including average night interruptions.
 
 ## Privacy
 
