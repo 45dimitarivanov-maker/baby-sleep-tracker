@@ -268,7 +268,7 @@
       <div class="stat wake">
         <div class="val" id="statWake">0h</div>
         <div class="lbl">Awake time</div>
-        <div class="sub">while tracked</div>
+        <div class="sub">between logged sleeps</div>
       </div>
       <div class="stat night">
         <div class="val" id="statNight">0h</div>
@@ -308,6 +308,7 @@
       <div class="stat wake">
         <div class="val" id="avgWake">0h</div>
         <div class="lbl">Avg awake / day</div>
+        <div class="sub">between logged sleeps</div>
       </div>
       <div class="stat night">
         <div class="val" id="avgNight">0h</div>
@@ -533,13 +534,17 @@ function render() {
     else { dayMins += s.mins; naps++; }
   });
   const totalMins = nightMins + dayMins;
-  const wakeMins = Math.max(0, 24 * 60 - totalMins);
+  // Awake time = only the KNOWN gaps between consecutive logged sleeps.
+  // We never derive it from (24h - sleep): an untracked gap means "not logged",
+  // not "awake", so that would be misleading on a partial log.
+  const wakeMins = trackedAwakeMins(sleeps);
 
   document.getElementById('statTotal').textContent = fmtDur(totalMins);
   document.getElementById('statNight').textContent = fmtDur(nightMins);
   document.getElementById('statDay').textContent = fmtDur(dayMins);
   document.getElementById('statNaps').textContent = naps + (naps === 1 ? ' nap' : ' naps');
-  document.getElementById('statWake').textContent = fmtDur(wakeMins);
+  // Need at least 2 sleeps to know any awake window; otherwise it's unknown.
+  document.getElementById('statWake').textContent = (sleeps.length >= 2) ? fmtDur(wakeMins) : '—';
 
   // sleep list (with editing + awake gaps between consecutive sleeps)
   const list = document.getElementById('sleepList');
@@ -598,6 +603,19 @@ function awakeGapMins(end, nextStart) {
   let e = eh * 60 + em, n = nh * 60 + nm;
   const gap = n - e;
   return gap >= 0 ? gap : null; // ignore overlaps/odd ordering
+}
+
+// Total KNOWN awake time for a day = sum of gaps between consecutive sleeps.
+// Only counts time bounded by a logged sleep on both sides. Time before the
+// first sleep or after the last one is unknown (not logged), so it is excluded.
+function trackedAwakeMins(sleeps) {
+  const ordered = sleeps.slice().sort((a, b) => a.start.localeCompare(b.start));
+  let total = 0;
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const gap = awakeGapMins(ordered[i].end, ordered[i + 1].start);
+    if (gap != null) total += gap;
+  }
+  return total;
 }
 
 // ---------- Inline editing ----------
@@ -672,6 +690,13 @@ function renderStats() {
     if (s.type === 'night') nightMins += s.mins;
     else { dayMins += s.mins; naps++; }
   });
+  // Known awake time per day = sum of gaps between that day's logged sleeps.
+  // Only days with 2+ sleeps contribute a known awake window.
+  let awakeSum = 0, awakeDays = 0;
+  daysWithData.forEach(dk => {
+    const daySleeps = inRange.filter(s => s.date === dk);
+    if (daySleeps.length >= 2) { awakeSum += trackedAwakeMins(daySleeps); awakeDays++; }
+  });
 
   // average over days that actually have data (so an untracked day doesn't skew it)
   const nDays = daysWithData.size || 1;
@@ -679,13 +704,13 @@ function renderStats() {
   const avgTotal = totalMins / nDays;
   const avgNight = nightMins / nDays;
   const avgDay = dayMins / nDays;
-  const avgWake = Math.max(0, 24 * 60 - avgTotal);
+  const avgWake = awakeDays ? awakeSum / awakeDays : null;
   const avgNaps = naps / nDays;
 
   document.getElementById('avgTotal').textContent = daysWithData.size ? fmtDur(Math.round(avgTotal)) : '—';
   document.getElementById('avgNight').textContent = daysWithData.size ? fmtDur(Math.round(avgNight)) : '—';
   document.getElementById('avgDay').textContent = daysWithData.size ? fmtDur(Math.round(avgDay)) : '—';
-  document.getElementById('avgWake').textContent = daysWithData.size ? fmtDur(Math.round(avgWake)) : '—';
+  document.getElementById('avgWake').textContent = (avgWake != null) ? fmtDur(Math.round(avgWake)) : '—';
   document.getElementById('avgNaps').textContent = daysWithData.size ? (Math.round(avgNaps * 10) / 10) + ' / day' : '';
 
   const note = document.getElementById('statNote');
