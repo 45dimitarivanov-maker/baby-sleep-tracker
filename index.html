@@ -247,6 +247,8 @@
   .badge.night { background: var(--night-soft); color: var(--night); }
   .badge.day { background: var(--day-soft); color: var(--day); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .opt { font-weight: 400; color: var(--muted); font-size: 11px; }
+  .sleep-downinfo { font-size: 11px; color: var(--muted); margin-top: 2px; }
   .footer { text-align: center; font-size: 12px; color: var(--muted); padding: 8px 0 24px; }
 </style>
 </head>
@@ -264,15 +266,23 @@
     </div>
     <div class="time-row">
       <div class="field">
+        <label>Put down to sleep <span class="opt">(optional)</span></label>
+        <div class="time-select" id="downPick"></div>
+        <button class="now-btn" onclick="setNow('down')">Now</button>
+      </div>
+      <div class="field">
         <label>Fell asleep</label>
         <div class="time-select" id="startPick"></div>
         <button class="now-btn" onclick="setNow('start')">Now</button>
       </div>
+    </div>
+    <div class="time-row">
       <div class="field">
         <label>Woke up</label>
         <div class="time-select" id="endPick"></div>
         <button class="now-btn" onclick="setNow('end')">Now</button>
       </div>
+      <div class="field" aria-hidden="true"></div>
     </div>
     <!-- Night-only: how many times sleep was interrupted -->
     <div class="field" id="interruptWrap" style="display:none;margin-top:12px">
@@ -288,7 +298,6 @@
       <textarea id="notesInput" rows="2" placeholder="e.g. fussy before sleep, teething, woke crying…"></textarea>
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
-    <div class="hint">Just type the time in 24-hour format, e.g. <b>14:32</b> (afternoon) or <b>9:05</b> (morning). Night sleep that crosses midnight (e.g. 20:00 → 6:00) is calculated automatically.</div>
   </div>
 
   <!-- Sleep log for the day -->
@@ -406,6 +415,17 @@ function escapeHtml(str) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
+// Minutes it took to fall asleep = fell-asleep − put-down. Put-down is expected
+// shortly before falling asleep; if it reads after, assume it crossed midnight.
+function settleMins(down, start) {
+  if (!down) return null;
+  const [dh, dm] = down.split(':').map(Number);
+  const [sh, sm] = start.split(':').map(Number);
+  let d = dh * 60 + dm, s = sh * 60 + sm;
+  if (s < d) s += 24 * 60; // e.g. put down 23:50, asleep 00:05
+  const diff = s - d;
+  return diff >= 0 && diff <= 12 * 60 ? diff : null; // sanity cap
+}
 
 // ---------- Time input (free-text 24-hour "HH:MM") ----------
 
@@ -506,11 +526,12 @@ function bumpInterrupt(delta) {
 }
 
 function addSleep() {
+  const down = readTimePicker('down'); // optional
   const start = readTimePicker('start');
   const end = readTimePicker('end');
-  if (!start || !end) { alert('Please pick both the fell-asleep and woke-up times.'); return; }
+  if (!start || !end) { alert('Please enter both the fell-asleep and woke-up times.'); return; }
   const mins = durationMins(start, end);
-  if (mins === 0) { alert('Start and end time are the same.'); return; }
+  if (mins === 0) { alert('Fell-asleep and woke-up times are the same.'); return; }
 
   const notes = document.getElementById('notesInput').value.trim();
   const interruptions = currentType === 'night'
@@ -522,6 +543,7 @@ function addSleep() {
     id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
     date: viewDate,
     type: currentType,
+    down: down || '',
     start, end,
     mins,
     interruptions,
@@ -529,6 +551,7 @@ function addSleep() {
   });
   saveSleeps(sleeps);
   // reset pickers + fields for quick next entry
+  buildTimePicker('downPick', 'down', null);
   buildTimePicker('startPick', 'start', null);
   buildTimePicker('endPick', 'end', null);
   document.getElementById('notesInput').value = '';
@@ -556,6 +579,7 @@ function copyFromYesterday() {
       id: Date.now() + '-' + (seq++) + '-' + Math.floor(performance.now() * 1000 % 100000),
       date: viewDate,
       type: s.type,
+      down: s.down || '',
       start: s.start,
       end: s.end,
       mins: s.mins,
@@ -634,6 +658,7 @@ function render() {
             <div class="dot ${s.type}"></div>
             <div class="info">
               <div class="times">${fmtTime(s.start)} → ${fmtTime(s.end)}</div>
+              ${s.down ? `<div class="sleep-downinfo">🛏️ Put down ${fmtTime(s.down)}${settleMins(s.down, s.start) != null ? ` · fell asleep in ${fmtDur(settleMins(s.down, s.start))}` : ''}</div>` : ''}
               <div class="meta">
                 <span class="badge ${s.type}">${s.type === 'night' ? '🌙 Night' : '☀️ Nap'}</span>
                 ${(s.type === 'night' && s.interruptions > 0) ? `<span class="sleep-interrupt">· woke ${s.interruptions}×</span>` : ''}
@@ -654,9 +679,10 @@ function render() {
       }
     });
     list.innerHTML = html;
-    // populate the picker dropdowns for any row being edited
+    // populate the time inputs for any row being edited
     sleeps.forEach(s => {
       if (s.id === editingId) {
+        buildTimePicker('eddown-' + s.id, 'eddown-' + s.id, s.down || null);
         buildTimePicker('edstart-' + s.id, 'edstart-' + s.id, s.start);
         buildTimePicker('edend-' + s.id, 'edend-' + s.id, s.end);
       }
@@ -719,6 +745,12 @@ function editFormHtml(s) {
           </select>
         </div>
         <div class="field">
+          <label>Put down <span class="opt">(optional)</span></label>
+          <div class="time-select" id="eddown-${s.id}"></div>
+        </div>
+      </div>
+      <div class="er">
+        <div class="field">
           <label>Fell asleep</label>
           <div class="time-select" id="edstart-${s.id}"></div>
         </div>
@@ -763,9 +795,10 @@ function saveEdit(id) {
   const type = document.getElementById('ed-type-' + id).value;
   const start = readTimePicker('edstart-' + id);
   const end = readTimePicker('edend-' + id);
-  if (!start || !end) { alert('Please pick both times.'); return; }
+  const down = readTimePicker('eddown-' + id); // optional
+  if (!start || !end) { alert('Please enter both the fell-asleep and woke-up times.'); return; }
   const mins = durationMins(start, end);
-  if (mins === 0) { alert('Start and end time are the same.'); return; }
+  if (mins === 0) { alert('Fell-asleep and woke-up times are the same.'); return; }
 
   const notes = document.getElementById('ed-notes-' + id).value.trim();
   const interruptions = type === 'night'
@@ -774,7 +807,7 @@ function saveEdit(id) {
 
   const sleeps = loadSleeps();
   const s = sleeps.find(x => x.id === id);
-  if (s) { s.type = type; s.start = start; s.end = end; s.mins = mins; s.interruptions = interruptions; s.notes = notes; }
+  if (s) { s.type = type; s.down = down || ''; s.start = start; s.end = end; s.mins = mins; s.interruptions = interruptions; s.notes = notes; }
   saveSleeps(sleeps);
   editingId = null;
   render();
@@ -841,6 +874,7 @@ function renderStats() {
 }
 
 // ---------- Init ----------
+buildTimePicker('downPick', 'down', null);
 buildTimePicker('startPick', 'start', null);
 buildTimePicker('endPick', 'end', null);
 attachNapAutofill();
