@@ -113,6 +113,13 @@
   .type-toggle button.active.day { border-color: var(--day); background: var(--day-soft); color: var(--day); }
   .time-row { display: flex; gap: 10px; margin-bottom: 12px; }
   .time-row .field { flex: 1; }
+  /* Three time inputs (put down / fell asleep / woke up) aligned in one row */
+  .time-row.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .time-row.three .field { min-width: 0; display: flex; flex-direction: column; }
+  .time-row.three label {
+    min-height: 30px; display: flex; align-items: flex-start; line-height: 1.25;
+    font-size: 11px;
+  }
   .now-btn {
     background: var(--primary-soft);
     color: var(--primary);
@@ -123,12 +130,13 @@
     font-weight: 700;
     cursor: pointer;
     margin-top: 4px;
+    align-self: center;
   }
   /* Time input (free-text HH:MM, 24h) */
   .time-select { display: flex; }
   .time-select input {
     flex: 1; min-width: 0; width: 100%; box-sizing: border-box;
-    padding: 12px 10px; text-align: center; font-size: 18px; font-weight: 700;
+    padding: 12px 4px; text-align: center; font-size: 17px; font-weight: 700;
     letter-spacing: 1px; border: 1px solid var(--line); border-radius: 8px;
     font-family: inherit; color: var(--ink);
   }
@@ -264,9 +272,9 @@
       <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
       <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
     </div>
-    <div class="time-row">
+    <div class="time-row three">
       <div class="field">
-        <label>Put down to sleep <span class="opt">(optional)</span></label>
+        <label>Put down <span class="opt">optional</span></label>
         <div class="time-select" id="downPick"></div>
         <button class="now-btn" onclick="setNow('down')">Now</button>
       </div>
@@ -275,14 +283,11 @@
         <div class="time-select" id="startPick"></div>
         <button class="now-btn" onclick="setNow('start')">Now</button>
       </div>
-    </div>
-    <div class="time-row">
       <div class="field">
         <label>Woke up</label>
         <div class="time-select" id="endPick"></div>
         <button class="now-btn" onclick="setNow('end')">Now</button>
       </div>
-      <div class="field" aria-hidden="true"></div>
     </div>
     <!-- Night-only: how many times sleep was interrupted -->
     <div class="field" id="interruptWrap" style="display:none;margin-top:12px">
