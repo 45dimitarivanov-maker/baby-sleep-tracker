@@ -11,15 +11,17 @@
     --ink: #1f2937;
     --muted: #6b7280;
     --line: #e5e7eb;
-    --primary: #6366f1;
-    --primary-soft: #eef2ff;
-    --night: #4338ca;
-    --night-soft: #e0e7ff;
-    --day: #f59e0b;
-    --day-soft: #fef3c7;
-    --wake: #10b981;
-    --wake-soft: #d1fae5;
-    --danger: #ef4444;
+    --primary: #2a78d6;
+    --primary-soft: #eaf2fc;
+    /* Stat-tile roles — validated categorical hues (dataviz palette).
+       Each tile identifies a different thing, so hues are assigned by identity,
+       not by "good/bad". Awake is a neutral slate on purpose: being awake is
+       neither good nor bad, so it must not read as green. */
+    --total: #2a78d6;   --total-soft: #eaf2fc;   /* blue  — headline */
+    --night: #4a3aa7;   --night-soft: #ecebf8;   /* violet — night */
+    --day:   #b06f00;   --day-soft:   #fcf3dc;   /* amber — day naps (ink darkened for contrast) */
+    --wake:  #52514e;   --wake-soft:  #f0f0ee;   /* slate — awake (neutral) */
+    --danger: #e34948;
     --shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.05);
   }
   * { box-sizing: border-box; }
@@ -31,15 +33,13 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
-  header {
-    background: linear-gradient(135deg, #6366f1, #4338ca);
-    color: #fff;
-    padding: 24px 20px;
-    text-align: center;
-  }
-  header h1 { margin: 0; font-size: 22px; letter-spacing: -.3px; }
-  header p { margin: 4px 0 0; opacity: .85; font-size: 13px; }
   .wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .app-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 18px; font-weight: 800; letter-spacing: -.3px;
+    color: var(--ink); margin: 6px 2px 14px;
+  }
+  .app-title .app-mark { font-size: 20px; line-height: 1; }
   .card {
     background: var(--card);
     border-radius: 16px;
@@ -110,7 +110,7 @@
     display: flex; align-items: center; justify-content: center; gap: 6px;
   }
   .type-toggle button.active.night { border-color: var(--night); background: var(--night-soft); color: var(--night); }
-  .type-toggle button.active.day { border-color: var(--day); background: var(--day-soft); color: #b45309; }
+  .type-toggle button.active.day { border-color: var(--day); background: var(--day-soft); color: var(--day); }
   .time-row { display: flex; gap: 10px; margin-bottom: 12px; }
   .time-row .field { flex: 1; }
   .now-btn {
@@ -151,9 +151,9 @@
   .stat .val { font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
   .stat .lbl { font-size: 12px; font-weight: 600; margin-top: 2px; opacity: .8; }
   .stat.night { background: var(--night-soft); color: var(--night); }
-  .stat.day { background: var(--day-soft); color: #b45309; }
-  .stat.total { background: var(--primary-soft); color: var(--primary); }
-  .stat.wake { background: var(--wake-soft); color: #047857; }
+  .stat.day { background: var(--day-soft); color: var(--day); }
+  .stat.total { background: var(--total-soft); color: var(--total); }
+  .stat.wake { background: var(--wake-soft); color: var(--wake); }
   .stat .sub { font-size: 11px; opacity: .7; margin-top: 2px; }
   /* Recommendation bar */
   .rec-box { margin-top: 14px; padding: 14px; border-radius: 12px; background: var(--bg); }
@@ -162,8 +162,8 @@
   .bar-fill { height: 100%; border-radius: 6px; transition: width .4s; }
   .bar-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 5px; }
   .rec-msg { font-size: 13px; margin-top: 10px; padding: 8px 10px; border-radius: 8px; }
-  .rec-msg.ok { background: var(--wake-soft); color: #047857; }
-  .rec-msg.low { background: var(--day-soft); color: #b45309; }
+  .rec-msg.ok { background: #e6f4e6; color: #006300; }
+  .rec-msg.low { background: var(--day-soft); color: var(--day); }
   .rec-msg.high { background: #dbeafe; color: #1e40af; }
   /* Sleep list */
   .sleep-item {
@@ -192,9 +192,9 @@
   .awake-gap {
     display: flex; align-items: center; gap: 8px;
     margin: 2px 0 2px 5px; padding: 4px 10px;
-    font-size: 12px; color: #047857; font-weight: 600;
+    font-size: 12px; color: #006300; font-weight: 600;
   }
-  .awake-gap .line { flex: 0 0 20px; border-left: 2px dashed var(--wake); height: 18px; margin-left: 4px; }
+  .awake-gap .line { flex: 0 0 20px; border-left: 2px dashed #0ca30c; height: 18px; margin-left: 4px; }
   /* Inline edit form */
   .edit-form { border: 2px solid var(--primary); border-radius: 12px; padding: 12px; margin-bottom: 8px; background: var(--primary-soft); }
   .edit-form .er { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
@@ -216,43 +216,17 @@
   .empty .emo { font-size: 32px; display: block; margin-bottom: 6px; }
   .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
   .badge.night { background: var(--night-soft); color: var(--night); }
-  .badge.day { background: var(--day-soft); color: #b45309; }
+  .badge.day { background: var(--day-soft); color: var(--day); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .footer { text-align: center; font-size: 12px; color: var(--muted); padding: 8px 0 24px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🌙 Baby Sleep Tracker</h1>
-  <p>Track naps, night sleep & awake time</p>
-</header>
 
 <div class="wrap">
+  <div class="app-title"><span class="app-mark">🌙</span> Baby Sleep Tracker</div>
 
-  <!-- Quick add -->
-  <div class="card">
-    <h2>Add a sleep</h2>
-    <div class="type-toggle">
-      <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
-      <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
-    </div>
-    <div class="time-row">
-      <div class="field">
-        <label>Fell asleep</label>
-        <div class="time-select" id="startPick"></div>
-        <button class="now-btn" onclick="setNow('start')">Now</button>
-      </div>
-      <div class="field">
-        <label>Woke up</label>
-        <div class="time-select" id="endPick"></div>
-        <button class="now-btn" onclick="setNow('end')">Now</button>
-      </div>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
-    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 8:00 PM → 6:00 AM), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
-  </div>
-
-  <!-- Daily dashboard -->
+  <!-- Daily dashboard (Today's summary) -->
   <div class="card">
     <div class="date-nav">
       <button onclick="changeDay(-1)">‹</button>
@@ -280,6 +254,29 @@
         <div class="sub" id="statNaps"></div>
       </div>
     </div>
+  </div>
+
+  <!-- Quick add -->
+  <div class="card">
+    <h2>Add a sleep</h2>
+    <div class="type-toggle">
+      <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
+      <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
+    </div>
+    <div class="time-row">
+      <div class="field">
+        <label>Fell asleep</label>
+        <div class="time-select" id="startPick"></div>
+        <button class="now-btn" onclick="setNow('start')">Now</button>
+      </div>
+      <div class="field">
+        <label>Woke up</label>
+        <div class="time-select" id="endPick"></div>
+        <button class="now-btn" onclick="setNow('end')">Now</button>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
+    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 8:00 PM → 6:00 AM), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
   </div>
 
   <!-- Sleep log for the day -->
