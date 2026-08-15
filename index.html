@@ -54,6 +54,16 @@
     letter-spacing: .5px;
     color: var(--muted);
   }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .card-head h2 { margin: 0; }
+  .btn-sm {
+    border: 1px solid var(--line); background: #fff; color: var(--primary);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 700;
+    cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .btn-sm:hover { background: var(--primary-soft); }
+  .btn-sm:disabled { color: var(--muted); cursor: not-allowed; opacity: .6; }
+  .btn-sm:disabled:hover { background: #fff; }
   /* Baby profile */
   .profile-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .field { flex: 1; min-width: 130px; }
@@ -114,6 +124,15 @@
     cursor: pointer;
     margin-top: 4px;
   }
+  /* Time picker (hour / min / am-pm dropdowns) */
+  .time-select { display: flex; gap: 5px; align-items: center; }
+  .time-select select {
+    flex: 1; min-width: 0; padding: 12px 6px; text-align: center;
+    font-size: 16px; font-weight: 600; -webkit-appearance: none; appearance: none;
+    background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>") no-repeat right 6px center;
+    padding-right: 18px;
+  }
+  .time-select .colon { font-weight: 800; color: var(--muted); }
   /* Date nav */
   .date-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
   .date-nav button {
@@ -219,18 +238,18 @@
     </div>
     <div class="time-row">
       <div class="field">
-        <label for="startTime">Fell asleep</label>
-        <input id="startTime" type="time">
-        <button class="now-btn" onclick="setNow('startTime')">Now</button>
+        <label>Fell asleep</label>
+        <div class="time-select" id="startPick"></div>
+        <button class="now-btn" onclick="setNow('start')">Now</button>
       </div>
       <div class="field">
-        <label for="endTime">Woke up</label>
-        <input id="endTime" type="time">
-        <button class="now-btn" onclick="setNow('endTime')">Now</button>
+        <label>Woke up</label>
+        <div class="time-select" id="endPick"></div>
+        <button class="now-btn" onclick="setNow('end')">Now</button>
       </div>
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add sleep</button>
-    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 8:00 PM → 6:00 AM), just enter both times — it's calculated automatically.</div>
+    <div class="hint">Tip: For night sleep that crosses midnight (e.g. 8:00 PM → 6:00 AM), just pick both times — it's calculated automatically. Minutes are in 5-minute steps.</div>
   </div>
 
   <!-- Daily dashboard -->
@@ -265,7 +284,10 @@
 
   <!-- Sleep log for the day -->
   <div class="card">
-    <h2>Sleep log</h2>
+    <div class="card-head">
+      <h2>Sleep log</h2>
+      <button class="btn-sm" id="copyYesterdayBtn" onclick="copyFromYesterday()">📋 Copy from yesterday</button>
+    </div>
     <div id="sleepList"></div>
   </div>
 
@@ -338,6 +360,57 @@ function to12h(hhmm) {
   return h12 + ':' + String(m).padStart(2, '0') + ' ' + ap;
 }
 
+// ---------- Time picker (hour / minute / AM-PM dropdowns) ----------
+const MIN_STEP = 5;
+
+// Build 3 dropdowns into a container. hhmm optional (24h "HH:MM") to preselect.
+function buildTimePicker(containerId, idPrefix, hhmm) {
+  let h24 = null, min = null;
+  if (hhmm) { const p = hhmm.split(':').map(Number); h24 = p[0]; min = p[1]; }
+  const ap = h24 == null ? 'AM' : (h24 >= 12 ? 'PM' : 'AM');
+  const h12 = h24 == null ? '' : (h24 % 12 || 12);
+  // snap minutes to nearest step for the dropdown
+  const minSnapped = min == null ? '' : Math.round(min / MIN_STEP) * MIN_STEP % 60;
+
+  let hourOpts = '<option value="" disabled ' + (h12 === '' ? 'selected' : '') + '>–</option>';
+  for (let i = 1; i <= 12; i++) hourOpts += `<option value="${i}" ${i === h12 ? 'selected' : ''}>${i}</option>`;
+
+  let minOpts = '<option value="" disabled ' + (minSnapped === '' ? 'selected' : '') + '>–</option>';
+  for (let i = 0; i < 60; i += MIN_STEP) {
+    const lbl = String(i).padStart(2, '0');
+    minOpts += `<option value="${i}" ${i === minSnapped ? 'selected' : ''}>${lbl}</option>`;
+  }
+
+  const apOpts = ['AM', 'PM'].map(v => `<option value="${v}" ${v === ap ? 'selected' : ''}>${v}</option>`).join('');
+
+  document.getElementById(containerId).innerHTML = `
+    <select id="${idPrefix}-h" aria-label="Hour">${hourOpts}</select>
+    <span class="colon">:</span>
+    <select id="${idPrefix}-m" aria-label="Minute">${minOpts}</select>
+    <select id="${idPrefix}-ap" aria-label="AM or PM">${apOpts}</select>`;
+}
+
+// Read a picker back to "HH:MM" (24h). Returns null if hour/minute not chosen.
+function readTimePicker(idPrefix) {
+  const h = document.getElementById(idPrefix + '-h').value;
+  const m = document.getElementById(idPrefix + '-m').value;
+  const ap = document.getElementById(idPrefix + '-ap').value;
+  if (h === '' || m === '') return null;
+  let h24 = Number(h) % 12;
+  if (ap === 'PM') h24 += 12;
+  return String(h24).padStart(2, '0') + ':' + String(Number(m)).padStart(2, '0');
+}
+
+function setTimePicker(idPrefix, hhmm) {
+  const [h24, m] = hhmm.split(':').map(Number);
+  const ap = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 || 12;
+  const mSnap = Math.round(m / MIN_STEP) * MIN_STEP % 60;
+  document.getElementById(idPrefix + '-h').value = String(h12);
+  document.getElementById(idPrefix + '-m').value = String(mSnap);
+  document.getElementById(idPrefix + '-ap').value = ap;
+}
+
 // Duration in minutes; if end <= start assume it crossed midnight (+24h)
 function durationMins(start, end) {
   const [sh, sm] = start.split(':').map(Number);
@@ -354,16 +427,16 @@ function setType(t) {
   document.getElementById('tDay').classList.toggle('active', t === 'day');
 }
 
-function setNow(id) {
+function setNow(prefix) {
   const now = new Date();
-  document.getElementById(id).value =
-    String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  setTimePicker(prefix, hhmm);
 }
 
 function addSleep() {
-  const start = document.getElementById('startTime').value;
-  const end = document.getElementById('endTime').value;
-  if (!start || !end) { alert('Please enter both the fell-asleep and woke-up times.'); return; }
+  const start = readTimePicker('start');
+  const end = readTimePicker('end');
+  if (!start || !end) { alert('Please pick both the fell-asleep and woke-up times.'); return; }
   const mins = durationMins(start, end);
   if (mins === 0) { alert('Start and end time are the same.'); return; }
 
@@ -376,9 +449,37 @@ function addSleep() {
     mins
   });
   saveSleeps(sleeps);
-  // reset time inputs for quick next entry
-  document.getElementById('startTime').value = '';
-  document.getElementById('endTime').value = '';
+  // reset pickers for quick next entry
+  buildTimePicker('startPick', 'start', null);
+  buildTimePicker('endPick', 'end', null);
+  render();
+}
+
+// Copy all of the previous day's sleeps into the currently viewed day
+function copyFromYesterday() {
+  const prev = todayISO(new Date(new Date(viewDate + 'T00:00:00').getTime() - 86400000));
+  const all = loadSleeps();
+  const source = all.filter(s => s.date === prev);
+  if (source.length === 0) { alert('No sleeps logged on the previous day to copy.'); return; }
+
+  const existing = all.filter(s => s.date === viewDate).length;
+  if (existing > 0 &&
+      !confirm(`This day already has ${existing} sleep${existing === 1 ? '' : 's'}. Add ${source.length} more copied from the previous day?`)) {
+    return;
+  }
+
+  let seq = 0;
+  source.forEach(s => {
+    all.push({
+      id: Date.now() + '-' + (seq++) + '-' + Math.floor(performance.now() * 1000 % 100000),
+      date: viewDate,
+      type: s.type,
+      start: s.start,
+      end: s.end,
+      mins: s.mins
+    });
+  });
+  saveSleeps(all);
   render();
 }
 
@@ -461,7 +562,21 @@ function render() {
       }
     });
     list.innerHTML = html;
+    // populate the picker dropdowns for any row being edited
+    sleeps.forEach(s => {
+      if (s.id === editingId) {
+        buildTimePicker('edstart-' + s.id, 'edstart-' + s.id, s.start);
+        buildTimePicker('edend-' + s.id, 'edend-' + s.id, s.end);
+      }
+    });
   }
+
+  // enable "copy from yesterday" only if the previous day has sleeps
+  const prev = todayISO(new Date(new Date(viewDate + 'T00:00:00').getTime() - 86400000));
+  const prevCount = loadSleeps().filter(s => s.date === prev).length;
+  const copyBtn = document.getElementById('copyYesterdayBtn');
+  copyBtn.disabled = prevCount === 0;
+  copyBtn.title = prevCount === 0 ? 'No sleeps on the previous day' : `Copy ${prevCount} sleep${prevCount === 1 ? '' : 's'} from the previous day`;
 
   renderStats();
 }
@@ -489,11 +604,11 @@ function editFormHtml(s) {
         </div>
         <div class="field">
           <label>Fell asleep</label>
-          <input id="ed-start-${s.id}" type="time" value="${s.start}">
+          <div class="time-select" id="edstart-${s.id}"></div>
         </div>
         <div class="field">
           <label>Woke up</label>
-          <input id="ed-end-${s.id}" type="time" value="${s.end}">
+          <div class="time-select" id="edend-${s.id}"></div>
         </div>
       </div>
       <div class="edit-actions">
@@ -508,9 +623,9 @@ function cancelEdit() { editingId = null; render(); }
 
 function saveEdit(id) {
   const type = document.getElementById('ed-type-' + id).value;
-  const start = document.getElementById('ed-start-' + id).value;
-  const end = document.getElementById('ed-end-' + id).value;
-  if (!start || !end) { alert('Please enter both times.'); return; }
+  const start = readTimePicker('edstart-' + id);
+  const end = readTimePicker('edend-' + id);
+  if (!start || !end) { alert('Please pick both times.'); return; }
   const mins = durationMins(start, end);
   if (mins === 0) { alert('Start and end time are the same.'); return; }
 
@@ -572,6 +687,8 @@ function renderStats() {
 }
 
 // ---------- Init ----------
+buildTimePicker('startPick', 'start', null);
+buildTimePicker('endPick', 'end', null);
 render();
 </script>
 </body>
