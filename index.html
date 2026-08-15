@@ -233,8 +233,8 @@
   <div class="card">
     <h2>Add a sleep</h2>
     <div class="type-toggle">
-      <button id="tNight" class="night active" onclick="setType('night')">🌙 Night sleep</button>
-      <button id="tDay" class="day" onclick="setType('day')">☀️ Nap (day)</button>
+      <button id="tDay" class="day active" onclick="setType('day')">☀️ Nap (day)</button>
+      <button id="tNight" class="night" onclick="setType('night')">🌙 Night sleep</button>
     </div>
     <div class="time-row">
       <div class="field">
@@ -329,7 +329,7 @@
 // ---------- Storage ----------
 const LS_SLEEPS = 'bst_sleeps';
 
-let currentType = 'night';
+let currentType = 'day';
 let viewDate = todayISO();
 let editingId = null;
 let statPeriod = 7;
@@ -425,6 +425,15 @@ function setType(t) {
   currentType = t;
   document.getElementById('tNight').classList.toggle('active', t === 'night');
   document.getElementById('tDay').classList.toggle('active', t === 'day');
+  // switching to Nap: if a start is set but no end yet, default end to start + 1h
+  if (t === 'day') {
+    const start = readTimePicker('start');
+    if (start && !readTimePicker('end')) {
+      const [h, m] = start.split(':').map(Number);
+      const endMins = (h * 60 + m + 60) % (24 * 60);
+      setTimePicker('end', String(Math.floor(endMins / 60)).padStart(2, '0') + ':' + String(endMins % 60).padStart(2, '0'));
+    }
+  }
 }
 
 function setNow(prefix) {
@@ -452,6 +461,7 @@ function addSleep() {
   // reset pickers for quick next entry
   buildTimePicker('startPick', 'start', null);
   buildTimePicker('endPick', 'end', null);
+  attachNapAutofill();
   render();
 }
 
@@ -689,7 +699,25 @@ function renderStats() {
 // ---------- Init ----------
 buildTimePicker('startPick', 'start', null);
 buildTimePicker('endPick', 'end', null);
+attachNapAutofill();
 render();
+
+// In Nap mode, when the start time is fully chosen and the end isn't set yet,
+// default the end to 1 hour after the start.
+function attachNapAutofill() {
+  ['start-h', 'start-m', 'start-ap'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      if (currentType !== 'day') return;
+      const start = readTimePicker('start');
+      if (!start) return;
+      if (readTimePicker('end')) return; // don't overwrite a value the user set
+      const [h, m] = start.split(':').map(Number);
+      const endMins = (h * 60 + m + 60) % (24 * 60);
+      const eh = Math.floor(endMins / 60), em = endMins % 60;
+      setTimePicker('end', String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0'));
+    });
+  });
+}
 </script>
 </body>
 </html>
