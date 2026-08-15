@@ -597,9 +597,9 @@ function render() {
   dLabel.innerHTML = head + '<div class="date-sub">' + nice + '</div>';
   document.getElementById('nextBtn').style.visibility = (viewDate >= today) ? 'hidden' : 'visible';
 
-  // sleeps for the day
-  const sleeps = loadSleeps().filter(s => s.date === viewDate)
-    .sort((a, b) => a.start.localeCompare(b.start));
+  // sleeps for the day, ordered along the real timeline (by wake-up time, so a
+  // midnight-crossing night that ends at 07:00 comes before the morning naps)
+  const sleeps = orderByWake(loadSleeps().filter(s => s.date === viewDate));
 
   let nightMins = 0, dayMins = 0, naps = 0;
   sleeps.forEach(s => {
@@ -673,20 +673,31 @@ function render() {
   renderStats();
 }
 
-// Awake minutes between one sleep's end and the next sleep's start (same day)
+// Awake minutes between one sleep's end and the next sleep's start (clock times).
+// Both are plain "HH:MM". A gap is only counted when the next sleep starts at or
+// after this one ended on the same calendar day (e.g. night ends 07:00, nap 09:00).
 function awakeGapMins(end, nextStart) {
   const [eh, em] = end.split(':').map(Number);
   const [nh, nm] = nextStart.split(':').map(Number);
-  let e = eh * 60 + em, n = nh * 60 + nm;
+  const e = eh * 60 + em, n = nh * 60 + nm;
   const gap = n - e;
   return gap >= 0 ? gap : null; // ignore overlaps/odd ordering
 }
 
-// Total KNOWN awake time for a day = sum of gaps between consecutive sleeps.
-// Only counts time bounded by a logged sleep on both sides. Time before the
-// first sleep or after the last one is unknown (not logged), so it is excluded.
+// Order a day's sleeps along the real timeline. A night sleep that crosses
+// midnight (end <= start) actually ENDS the next morning, so its wake-up sits
+// at the very start of the day — it should come before the morning naps.
+// We anchor each entry by the clock time the baby WOKE UP (its end).
+function orderByWake(sleeps) {
+  return sleeps.slice().sort((a, b) => a.end.localeCompare(b.end));
+}
+
+// Total KNOWN awake time for a day = sum of gaps between consecutive sleeps,
+// ordered by wake-up time. Counts e.g. the morning gap between a night that
+// ends at 07:00 and the first nap at 09:00. Time before the first wake-up or
+// after the last sleep starts is unknown (not logged), so it is excluded.
 function trackedAwakeMins(sleeps) {
-  const ordered = sleeps.slice().sort((a, b) => a.start.localeCompare(b.start));
+  const ordered = orderByWake(sleeps);
   let total = 0;
   for (let i = 0; i < ordered.length - 1; i++) {
     const gap = awakeGapMins(ordered[i].end, ordered[i + 1].start);
