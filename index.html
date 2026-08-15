@@ -354,27 +354,27 @@ function fmtDur(mins) {
   if (h) return h + 'h';
   return m + 'm';
 }
-function to12h(hhmm) {
+// Format a stored "HH:MM" (24h) for display, e.g. "09:00" or "21:30".
+function fmtTime(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
-  const ap = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return h12 + ':' + String(m).padStart(2, '0') + ' ' + ap;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
-// ---------- Time picker (hour / minute / AM-PM dropdowns) ----------
+// ---------- Time picker (24-hour: hour 0-23 / minute dropdowns) ----------
 const MIN_STEP = 5;
 
-// Build 3 dropdowns into a container. hhmm optional (24h "HH:MM") to preselect.
+// Build 2 dropdowns into a container. hhmm optional (24h "HH:MM") to preselect.
 function buildTimePicker(containerId, idPrefix, hhmm) {
   let h24 = null, min = null;
   if (hhmm) { const p = hhmm.split(':').map(Number); h24 = p[0]; min = p[1]; }
-  const ap = h24 == null ? 'AM' : (h24 >= 12 ? 'PM' : 'AM');
-  const h12 = h24 == null ? '' : (h24 % 12 || 12);
   // snap minutes to nearest step for the dropdown
   const minSnapped = min == null ? '' : Math.round(min / MIN_STEP) * MIN_STEP % 60;
 
-  let hourOpts = '<option value="" disabled ' + (h12 === '' ? 'selected' : '') + '>–</option>';
-  for (let i = 1; i <= 12; i++) hourOpts += `<option value="${i}" ${i === h12 ? 'selected' : ''}>${i}</option>`;
+  let hourOpts = '<option value="" disabled ' + (h24 == null ? 'selected' : '') + '>–</option>';
+  for (let i = 0; i < 24; i++) {
+    const lbl = String(i).padStart(2, '0');
+    hourOpts += `<option value="${i}" ${i === h24 ? 'selected' : ''}>${lbl}</option>`;
+  }
 
   let minOpts = '<option value="" disabled ' + (minSnapped === '' ? 'selected' : '') + '>–</option>';
   for (let i = 0; i < 60; i += MIN_STEP) {
@@ -382,34 +382,25 @@ function buildTimePicker(containerId, idPrefix, hhmm) {
     minOpts += `<option value="${i}" ${i === minSnapped ? 'selected' : ''}>${lbl}</option>`;
   }
 
-  const apOpts = ['AM', 'PM'].map(v => `<option value="${v}" ${v === ap ? 'selected' : ''}>${v}</option>`).join('');
-
   document.getElementById(containerId).innerHTML = `
-    <select id="${idPrefix}-h" aria-label="Hour">${hourOpts}</select>
+    <select id="${idPrefix}-h" aria-label="Hour (24h)">${hourOpts}</select>
     <span class="colon">:</span>
-    <select id="${idPrefix}-m" aria-label="Minute">${minOpts}</select>
-    <select id="${idPrefix}-ap" aria-label="AM or PM">${apOpts}</select>`;
+    <select id="${idPrefix}-m" aria-label="Minute">${minOpts}</select>`;
 }
 
 // Read a picker back to "HH:MM" (24h). Returns null if hour/minute not chosen.
 function readTimePicker(idPrefix) {
   const h = document.getElementById(idPrefix + '-h').value;
   const m = document.getElementById(idPrefix + '-m').value;
-  const ap = document.getElementById(idPrefix + '-ap').value;
   if (h === '' || m === '') return null;
-  let h24 = Number(h) % 12;
-  if (ap === 'PM') h24 += 12;
-  return String(h24).padStart(2, '0') + ':' + String(Number(m)).padStart(2, '0');
+  return String(Number(h)).padStart(2, '0') + ':' + String(Number(m)).padStart(2, '0');
 }
 
 function setTimePicker(idPrefix, hhmm) {
   const [h24, m] = hhmm.split(':').map(Number);
-  const ap = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = h24 % 12 || 12;
   const mSnap = Math.round(m / MIN_STEP) * MIN_STEP % 60;
-  document.getElementById(idPrefix + '-h').value = String(h12);
+  document.getElementById(idPrefix + '-h').value = String(h24);
   document.getElementById(idPrefix + '-m').value = String(mSnap);
-  document.getElementById(idPrefix + '-ap').value = ap;
 }
 
 // Duration in minutes; if end <= start assume it crossed midnight (+24h)
@@ -560,7 +551,7 @@ function render() {
           <div class="sleep-item">
             <div class="dot ${s.type}"></div>
             <div class="info">
-              <div class="times">${to12h(s.start)} → ${to12h(s.end)}</div>
+              <div class="times">${fmtTime(s.start)} → ${fmtTime(s.end)}</div>
               <div class="meta"><span class="badge ${s.type}">${s.type === 'night' ? '🌙 Night' : '☀️ Nap'}</span></div>
             </div>
             <div class="dur">${fmtDur(s.mins)}</div>
@@ -730,7 +721,7 @@ render();
 // In Nap mode, when the start time is fully chosen and the end isn't set yet,
 // default the end to 1 hour after the start.
 function attachNapAutofill() {
-  ['start-h', 'start-m', 'start-ap'].forEach(id => {
+  ['start-h', 'start-m'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
       if (currentType !== 'day') return;
       const start = readTimePicker('start');
