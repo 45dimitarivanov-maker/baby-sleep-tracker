@@ -132,18 +132,7 @@
     min-height: 30px; display: flex; align-items: flex-start; line-height: 1.25;
     font-size: 11px;
   }
-  .now-btn {
-    background: var(--primary-soft);
-    color: var(--primary);
-    border: none;
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    margin-top: 4px;
-    align-self: center;
-  }
+  .now-btn { display: none; }
   /* Time input (free-text HH:MM, 24h) */
   .time-select { display: flex; }
   .time-select input {
@@ -296,17 +285,14 @@
       <div class="field">
         <label>Put down <span class="opt">optional</span></label>
         <div class="time-select" id="downPick"></div>
-        <button class="now-btn" onclick="setNow('down')">Now</button>
       </div>
       <div class="field">
         <label>Fell asleep</label>
         <div class="time-select" id="startPick"></div>
-        <button class="now-btn" onclick="setNow('start')">Now</button>
       </div>
       <div class="field">
         <label>Woke up</label>
         <div class="time-select" id="endPick"></div>
-        <button class="now-btn" onclick="setNow('end')">Now</button>
       </div>
     </div>
     <!-- Night-only: how many times sleep was interrupted -->
@@ -535,12 +521,6 @@ function setType(t) {
       setTimePicker('end', String(Math.floor(endMins / 60)).padStart(2, '0') + ':' + String(endMins % 60).padStart(2, '0'));
     }
   }
-}
-
-function setNow(prefix) {
-  const now = new Date();
-  const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  setTimePicker(prefix, hhmm);
 }
 
 // +/- on the night-interruption counter (never below 0)
@@ -877,7 +857,6 @@ function renderNightCard() {
         </div>
       </div>
       <div class="night-actions">
-        <button class="btn btn-night" onclick="setNow('wake')">🕐 Woke now</button>
         <button class="btn btn-primary" onclick="completeNight()">✓ Save night</button>
       </div>`;
     buildTimePicker('wakePick', 'wake', null);
@@ -892,7 +871,6 @@ function renderNightCard() {
         </div>
       </div>
       <div class="night-actions">
-        <button class="btn btn-ghost" onclick="setNow('bed')">🕐 Now</button>
         <button class="btn btn-night" onclick="logBedtime()">🌙 Log bedtime</button>
       </div>`;
     buildTimePicker('bedPick', 'bed', null);
