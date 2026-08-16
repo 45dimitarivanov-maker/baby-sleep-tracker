@@ -184,6 +184,8 @@
   .sleep-item .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .sleep-item .dot.night { background: var(--night); }
   .sleep-item .dot.day { background: var(--day); }
+  /* Last night's sleep = context from the previous day (dimmed, dashed border) */
+  .sleep-item.last-night { border-style: dashed; background: var(--night-soft); opacity: .92; }
   .sleep-item .info { flex: 1; }
   .sleep-item .times { font-weight: 600; font-size: 15px; }
   .sleep-item .times .next-morn { font-size: 11px; font-weight: 600; color: var(--muted); }
@@ -630,6 +632,10 @@ function render() {
   // night that started this evening). A night is dated to its bedtime day.
   const sleeps = orderByWake(loadSleeps().filter(s => s.date === viewDate));
   const prevWake = prevNightWake(viewDate); // last night's wake feeds this morning
+  // full completed night from yesterday, shown as the top row for morning context
+  const prevDay = todayISO(new Date(new Date(viewDate + 'T00:00:00').getTime() - 86400000));
+  const pn = nightForDay(prevDay);
+  const prevNight = (pn && pn.end && !pn.pending) ? pn : null;
 
   let nightMins = 0, dayMins = 0, naps = 0;
   sleeps.forEach(s => {
@@ -654,16 +660,17 @@ function render() {
   const list = document.getElementById('sleepList');
   const napList = sleeps.filter(s => s.type !== 'night');
   const nightEntry = sleeps.find(s => s.type === 'night');
-  if (sleeps.length === 0 && !prevWake) {
+  if (sleeps.length === 0 && !prevNight) {
     list.innerHTML = '<div class="empty"><span class="emo">🛌</span>No sleeps logged for this day yet.<br>Add one above to get started.</div>';
   } else {
     let html = '';
-    // leading morning marker: woke from last night at …
-    if (prevWake) {
-      html += `<div class="awake-gap"><span class="line"></span>🌅 Woke from last night at ${fmtTime(prevWake)}</div>`;
+    // Top of the day: last night's completed sleep as a full (read-only) row —
+    // it belongs to yesterday for stats, but is shown here for morning context.
+    if (prevNight) {
+      html += lastNightRowHtml(prevNight);
       const firstStart = napList.length ? napList[0].start : (nightEntry ? nightEntry.start : null);
       if (firstStart) {
-        const g = awakeGapMins(prevWake, firstStart);
+        const g = awakeGapMins(prevNight.end, firstStart);
         if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
       }
     }
@@ -785,6 +792,33 @@ function sleepRowHtml(s) {
       <button class="edit" onclick="startEdit('${s.id}')" title="Edit">✏️</button>
       <button class="del" onclick="deleteSleep('${s.id}')" title="Delete">✕</button>
     </div>`;
+}
+
+// The completed night from YESTERDAY, shown at the top of today's log for
+// morning context (bedtime → wake). It's stored on yesterday, so editing it
+// jumps back to that day; there's no delete here to avoid confusion.
+function lastNightRowHtml(s) {
+  return `
+    <div class="sleep-item last-night">
+      <div class="dot night"></div>
+      <div class="info">
+        <div class="times">${fmtTime(s.start)} → ${fmtTime(s.end)} <span class="next-morn">(last night)</span></div>
+        <div class="meta">
+          <span class="badge night">🌙 Last night</span>
+          ${(s.interruptions > 0) ? `<span class="sleep-interrupt">· woke ${s.interruptions}×</span>` : ''}
+        </div>
+        ${s.notes ? `<div class="sleep-note">📝 ${escapeHtml(s.notes)}</div>` : ''}
+      </div>
+      <div class="dur">${fmtDur(s.mins)}</div>
+      <button class="edit" onclick="editLastNight('${s.id}','${s.date}')" title="Edit on ${s.date}">✏️</button>
+    </div>`;
+}
+
+// Edit last night's entry — it lives on the previous day, so switch there first.
+function editLastNight(id, iso) {
+  viewDate = iso;
+  editingId = id;
+  render();
 }
 
 // ---------- Night sleep (bedtime evening → wake next morning) ----------
