@@ -828,25 +828,41 @@ function findPendingNight() {
   return loadSleeps().find(s => s.type === 'night' && (s.pending || !s.end)) || null;
 }
 
-// Evening: log bedtime, creating a pending night dated to TODAY (the day it started).
-function logBedtime(time) {
-  const start = time || readTimePicker('bed');
+// Save from the default night card. Two modes:
+//  • Bedtime only            → pending night for tonight, dated TODAY.
+//  • Bedtime + Woke up given  → last night's completed sleep. The bedtime was
+//    YESTERDAY evening and the wake is THIS morning, so date it to yesterday
+//    (the day it started) — that makes today's morning awake window measure
+//    from the wake time, not the bedtime.
+function logNight() {
+  const start = readTimePicker('bed');
+  const end = readTimePicker('wake');
   if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
   const existing = findPendingNight();
-  if (existing) { alert('A night is already in progress (bedtime ' + fmtTime(existing.start) + '). Enter the wake time in the morning to finish it.'); return; }
+  if (existing) { alert('A night is already in progress (bedtime ' + fmtTime(existing.start) + '). Finish it first.'); return; }
+
+  const wi = document.getElementById('wakeInterrupt');
+  const interruptions = Math.max(0, parseInt(wi ? wi.value : 0, 10) || 0);
   const sleeps = loadSleeps();
-  sleeps.push({
-    id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
-    date: todayISO(),          // night counts toward the day it STARTED
-    type: 'night',
-    down: '',
-    start,                     // bedtime
-    end: '',                   // filled in the morning
-    mins: 0,
-    interruptions: 0,
-    notes: '',
-    pending: true
-  });
+
+  if (end) {
+    // completed night — dated to the day it STARTED (yesterday, relative to now)
+    const startDay = todayISO(new Date(Date.now() - 86400000));
+    const mins = durationMins(start, end);
+    if (mins === 0) { alert('Bedtime and wake time are the same.'); return; }
+    sleeps.push({
+      id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
+      date: startDay, type: 'night', down: '',
+      start, end, mins, interruptions, notes: '', pending: false
+    });
+  } else {
+    // bedtime only — pending night for tonight, dated today
+    sleeps.push({
+      id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
+      date: todayISO(), type: 'night', down: '',
+      start, end: '', mins: 0, interruptions, notes: '', pending: true
+    });
+  }
   saveSleeps(sleeps);
   render();
 }
@@ -895,19 +911,35 @@ function renderNightCard() {
       </div>`;
     buildTimePicker('wakePick', 'wake', null);
   } else {
+    // No night in progress. Offer BOTH fields:
+    //  • fill Bedtime only  → pending night for tonight (dates to today)
+    //  • fill Bedtime + Woke → last night's completed sleep (dates to yesterday)
     title.textContent = '🌙 Night sleep';
     body.innerHTML = `
-      <div class="night-status">Log bedtime tonight — you'll enter the wake time in the morning.</div>
+      <div class="night-status">Log <b>bedtime</b> tonight, or enter <b>both</b> times in the morning to record last night.</div>
       <div class="night-row">
         <div class="field">
           <label>Bedtime</label>
           <div class="time-select" id="bedPick"></div>
         </div>
+        <div class="field">
+          <label>Woke up <span class="opt">optional</span></label>
+          <div class="time-select" id="wakePick"></div>
+        </div>
+        <div class="field" style="flex:0 0 auto">
+          <label>Woke in night</label>
+          <div class="stepper">
+            <button type="button" onclick="bumpWakeInterrupt(-1)">−</button>
+            <input type="number" id="wakeInterrupt" min="0" step="1" value="0" inputmode="numeric" style="width:52px">
+            <button type="button" onclick="bumpWakeInterrupt(1)">+</button>
+          </div>
+        </div>
       </div>
       <div class="night-actions">
-        <button class="btn btn-night" onclick="logBedtime()">🌙 Log bedtime</button>
+        <button class="btn btn-night" onclick="logNight()">🌙 Save night</button>
       </div>`;
     buildTimePicker('bedPick', 'bed', null);
+    buildTimePicker('wakePick', 'wake', null);
   }
 }
 
