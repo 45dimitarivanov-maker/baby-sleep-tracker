@@ -645,9 +645,12 @@ function render() {
     else { dayMins += s.mins; naps++; }
   });
   const totalMins = nightMins + dayMins;
-  // Awake time = only the KNOWN gaps (previous night wake → naps → bedtime).
+  // Awake time = the KNOWN daytime gaps (this morning's wake → naps). The morning
+  // wake comes from today's own completed night, else last night's wake.
   const wakeMins = trackedAwakeMins(sleeps, prevWake);
-  const awakeKnown = (prevWake && (naps > 0 || nightMins > 0)) || sleeps.length >= 2;
+  const todayNight = sleeps.find(s => s.type === 'night');
+  const morningWakeKnown = (todayNight && todayNight.end && !todayNight.pending) || !!prevWake;
+  const awakeKnown = (morningWakeKnown && naps > 0) || naps >= 2;
 
   document.getElementById('statTotal').textContent = fmtDur(totalMins);
   document.getElementById('statNight').textContent = fmtDur(nightMins);
@@ -658,37 +661,44 @@ function render() {
   // the night card (bedtime / morning-complete) always reflects state
   renderNightCard();
 
-  // sleep list: previous night's wake, then naps, then tonight's bedtime
+  // sleep list layout (top → bottom):
+  //   1. the night that STARTED this day (bedtime → wake), shown first
+  //   2. the morning awake gap (last night's wake → today's first nap)
+  //   3. naps in chronological order, with awake gaps between them
+  // The night is a single event that ends the *next* morning, so it never sits
+  // "between" naps — drawing a nap→night gap is meaningless (that was the old
+  // 10h55m bug). We only draw awake windows across the daytime timeline.
   const list = document.getElementById('sleepList');
-  const napList = sleeps.filter(s => s.type !== 'night');
+  const napList = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
   const nightEntry = sleeps.find(s => s.type === 'night');
+  // The morning wake that feeds today's daytime awake window: prefer the night
+  // that STARTED today (its wake is this morning); else last night's (prevNight/
+  // prevWake). If today's night is still pending (no wake yet), fall back too.
+  const morningWake = (nightEntry && nightEntry.end && !nightEntry.pending)
+    ? nightEntry.end
+    : (prevNight ? prevNight.end : prevWake);
   if (sleeps.length === 0 && !prevNight) {
     list.innerHTML = '<div class="empty"><span class="emo">🛌</span>No sleeps logged for this day yet.<br>Add one above to get started.</div>';
   } else {
     let html = '';
-    // Top of the day: last night's completed sleep as a full (read-only) row —
-    // it belongs to yesterday for stats, but is shown here for morning context.
-    if (prevNight) {
+    // 1. Night first. Prefer this day's own night; otherwise show last night's
+    //    completed sleep (from yesterday) as read-only morning context.
+    if (nightEntry) {
+      html += (nightEntry.id === editingId) ? editFormHtml(nightEntry) : sleepRowHtml(nightEntry);
+    } else if (prevNight) {
       html += lastNightRowHtml(prevNight);
-      const firstStart = napList.length ? napList[0].start : (nightEntry ? nightEntry.start : null);
-      if (firstStart) {
-        const g = awakeGapMins(prevNight.end, firstStart);
-        if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
-      }
     }
-    // ordered rows (naps first, then tonight's night)
-    sleeps.forEach((s, i) => {
-      if (s.id === editingId) {
-        html += editFormHtml(s);
-      } else {
-        html += sleepRowHtml(s);
-      }
-      // awake gap to the next OWN entry (naps→naps, last nap→bedtime)
-      if (i < sleeps.length - 1) {
-        const gap = awakeGapMins(s.end || s.start, sleeps[i + 1].start);
-        if (gap != null && s.end) {
-          html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
-        }
+    // 2. Morning awake gap: from the wake time to the first nap.
+    if (morningWake && napList.length) {
+      const g = awakeGapMins(morningWake, napList[0].start);
+      if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
+    }
+    // 3. Naps, chronological, with awake gaps between consecutive naps.
+    napList.forEach((s, i) => {
+      html += (s.id === editingId) ? editFormHtml(s) : sleepRowHtml(s);
+      if (i < napList.length - 1 && s.end) {
+        const gap = awakeGapMins(s.end, napList[i + 1].start);
+        if (gap != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
       }
     });
     list.innerHTML = html;
@@ -722,13 +732,13 @@ function awakeGapMins(end, nextStart) {
   return gap >= 0 ? gap : null; // ignore overlaps/odd ordering
 }
 
-// Build the real-time order of a single day's OWN entries. A night is dated to
-// the day it STARTED (bedtime), so it belongs at the END of that day's timeline
-// (evening bedtime), while naps come first ordered by start time.
+// Collect a single day's OWN entries (naps sorted by start, then the night).
+// Display ordering is handled directly in render()/renderStats(); this helper is
+// just a stable grouping used by the stats-awake computation.
 function orderByWake(sleeps) {
   const naps = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
   const nights = sleeps.filter(s => s.type === 'night').sort((a, b) => a.start.localeCompare(b.start));
-  return [...naps, ...nights]; // naps through the day, then tonight's night last
+  return [...naps, ...nights];
 }
 
 // Look up the night record that STARTED on ISO day "YYYY-MM-DD" (that day's night).
@@ -744,26 +754,26 @@ function prevNightWake(iso) {
   return n && n.end && !n.pending ? n.end : null;
 }
 
-// KNOWN awake time for a day. The day's awake windows are:
-//   (previous night's wake) → first nap → … → last nap → (tonight's bedtime)
-// Because a night is dated to its bedtime day, the morning wake belongs to the
-// PREVIOUS day's night. `prevNightEnd` (a completed night's wake "HH:MM" or null)
-// supplies that leading morning window; the trailing window is naps → bedtime.
+// KNOWN awake time for a day = the daytime windows only:
+//   (this morning's wake) → first nap → … → last nap
+// The morning wake comes from whichever night ended this morning: today's own
+// night if it's completed (bedtime yesterday-evening → wake today), otherwise
+// the previous day's night (`prevNightEnd`). We do NOT add a "last nap → tonight's
+// bedtime" window: bedtime opens the *next* night, not a same-day awake gap, and
+// counting it produced nonsensical values (e.g. 10h55m from a nap end to 21:00).
 function trackedAwakeMins(sleeps, prevNightEnd) {
   const naps = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
   const night = sleeps.find(s => s.type === 'night');
+  // morning wake: this day's own completed night wakes this morning; else use
+  // the previous night's wake passed in.
+  const morningWake = (night && night.end && !night.pending) ? night.end : prevNightEnd;
   let total = 0;
-  const firstStart = naps.length ? naps[0].start : (night && night.start ? night.start : null);
-  if (prevNightEnd && firstStart) {
-    const g = awakeGapMins(prevNightEnd, firstStart);
+  if (morningWake && naps.length) {
+    const g = awakeGapMins(morningWake, naps[0].start);
     if (g != null) total += g;
   }
   for (let i = 0; i < naps.length - 1; i++) {
     const g = awakeGapMins(naps[i].end, naps[i + 1].start);
-    if (g != null) total += g;
-  }
-  if (naps.length && night && night.start) {
-    const g = awakeGapMins(naps[naps.length - 1].end, night.start);
     if (g != null) total += g;
   }
   return total;
@@ -1072,14 +1082,17 @@ function renderStats() {
     if (s.type === 'night') { nightMins += s.mins; interruptSum += (s.interruptions || 0); nightCount++; }
     else { dayMins += s.mins; naps++; }
   });
-  // Known awake time per day = the previous night's wake → naps → tonight's
-  // bedtime gaps. A day has a known window if it has 2+ own sleeps, OR just one
-  // sleep plus a completed previous night to measure the morning gap against.
+  // Known awake time per day = this morning's wake → naps windows. A day has a
+  // measurable window when it has a morning wake (its own completed night, or the
+  // previous night's) plus at least one nap, or 2+ naps on the day.
   let awakeSum = 0, awakeDays = 0;
   daysWithData.forEach(dk => {
     const daySleeps = orderByWake(inRange.filter(s => s.date === dk));
     const prevWake = prevNightWake(dk);
-    if (daySleeps.length >= 2 || (daySleeps.length >= 1 && prevWake)) {
+    const dayNaps = daySleeps.filter(s => s.type !== 'night');
+    const ownNight = daySleeps.find(s => s.type === 'night');
+    const morningWake = (ownNight && ownNight.end && !ownNight.pending) || !!prevWake;
+    if ((morningWake && dayNaps.length >= 1) || dayNaps.length >= 2) {
       awakeSum += trackedAwakeMins(daySleeps, prevWake);
       awakeDays++;
     }
