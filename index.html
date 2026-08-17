@@ -884,15 +884,35 @@ function logMorningWake() {
 }
 
 // Evening: log tonight's bedtime → pending night dated to TODAY.
+// A pending night only counts as tonight's duplicate if today has NO completed
+// night yet. If today already has a completed night (last night's 21:00→07:00
+// dated today) plus a leftover pending row, that pending row is stale — we drop
+// it. Stale pending nights on earlier days are dropped too, so the log self-heals
+// and never blocks you from logging a fresh bedtime.
 function logTonightBedtime() {
   const start = readTimePicker('bed');
   if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
-  const existing = findPendingNight();
-  if (existing) { alert('A bedtime is already logged (' + fmtTime(existing.start) + ') and waiting for a wake time. Log the wake first.'); return; }
-  const sleeps = loadSleeps();
+  const today = todayISO();
+  let sleeps = loadSleeps();
+
+  const hasCompletedTonight = sleeps.some(s => s.type === 'night' && s.date === today && s.end && !s.pending);
+  const tonightPending = sleeps.find(s => s.type === 'night' && s.date === today && (s.pending || !s.end));
+
+  // Genuine duplicate: a pending bedtime for tonight, and no completed night has
+  // superseded it. Otherwise the pending row is stale and gets cleaned below.
+  if (tonightPending && !hasCompletedTonight) {
+    alert('A bedtime is already logged for tonight (' + fmtTime(tonightPending.start) + ') and is waiting for tomorrow morning\'s wake time. Edit it in the log if the time is wrong.');
+    return;
+  }
+
+  // Self-heal: drop any pending (never-completed) night — a stale leftover from
+  // an earlier day, or a duplicate pending row from today that a completed night
+  // has already replaced. Completed nights (with a wake time) are always kept.
+  sleeps = sleeps.filter(s => !(s.type === 'night' && (s.pending || !s.end) && !s.end));
+
   sleeps.push({
     id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
-    date: todayISO(), type: 'night', down: '',
+    date: today, type: 'night', down: '',
     start, end: '', mins: 0, interruptions: 0, notes: '', pending: true
   });
   saveSleeps(sleeps);
