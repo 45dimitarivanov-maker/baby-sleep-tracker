@@ -108,6 +108,8 @@
   .night-done { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--night); font-weight: 600; }
   .night-actions { display: flex; gap: 8px; }
   .night-actions .btn { flex: 1; }
+  .night-divider { height: 1px; background: var(--line); margin: 18px 0 14px; }
+  .bed-unknown { color: var(--danger); font-weight: 800; }
   .type-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
   .type-toggle button {
     flex: 1;
@@ -751,7 +753,7 @@ function trackedAwakeMins(sleeps, prevNightEnd) {
   const naps = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
   const night = sleeps.find(s => s.type === 'night');
   let total = 0;
-  const firstStart = naps.length ? naps[0].start : (night ? night.start : null);
+  const firstStart = naps.length ? naps[0].start : (night && night.start ? night.start : null);
   if (prevNightEnd && firstStart) {
     const g = awakeGapMins(prevNightEnd, firstStart);
     if (g != null) total += g;
@@ -760,7 +762,7 @@ function trackedAwakeMins(sleeps, prevNightEnd) {
     const g = awakeGapMins(naps[i].end, naps[i + 1].start);
     if (g != null) total += g;
   }
-  if (naps.length && night) {
+  if (naps.length && night && night.start) {
     const g = awakeGapMins(naps[naps.length - 1].end, night.start);
     if (g != null) total += g;
   }
@@ -769,18 +771,21 @@ function trackedAwakeMins(sleeps, prevNightEnd) {
 
 // One row in the sleep log. A night spans into the next morning, so label its
 // times "21:00 → 07:00 (next morning)"; a pending night shows "still asleep".
+// Bedtime may be unknown (blank) if only the wake was logged — show "?".
 function sleepRowHtml(s) {
   const isNight = s.type === 'night';
   const pending = isNight && (s.pending || !s.end);
+  const bed = s.start ? fmtTime(s.start) : '<span class="bed-unknown">?</span>';
   const timesHtml = pending
-    ? `${fmtTime(s.start)} → <span class="pending-wake">still asleep…</span>`
-    : `${fmtTime(s.start)} → ${fmtTime(s.end)}${isNight ? ' <span class="next-morn">(next morning)</span>' : ''}`;
-  const durHtml = pending ? '' : fmtDur(s.mins);
+    ? `${bed} → <span class="pending-wake">still asleep…</span>`
+    : `${bed} → ${fmtTime(s.end)}${isNight ? ' <span class="next-morn">(next morning)</span>' : ''}`;
+  const durHtml = (pending || (isNight && !s.start)) ? '' : fmtDur(s.mins);
   return `
     <div class="sleep-item">
       <div class="dot ${s.type}"></div>
       <div class="info">
         <div class="times">${timesHtml}</div>
+        ${(isNight && !s.start && s.end) ? `<div class="sleep-downinfo">🌙 Bedtime not set — tap ✏️ to add it</div>` : ''}
         ${s.down ? `<div class="sleep-downinfo">🛏️ Put down ${fmtTime(s.down)}${settleMins(s.down, s.start) != null ? ` · fell asleep in ${fmtDur(settleMins(s.down, s.start))}` : ''}</div>` : ''}
         <div class="meta">
           <span class="badge ${s.type}">${isNight ? '🌙 Night' : '☀️ Nap'}</span>
@@ -796,20 +801,23 @@ function sleepRowHtml(s) {
 
 // The completed night from YESTERDAY, shown at the top of today's log for
 // morning context (bedtime → wake). It's stored on yesterday, so editing it
-// jumps back to that day; there's no delete here to avoid confusion.
+// jumps back to that day; there's no delete here to avoid confusion. Bedtime
+// may be unknown ("?") until you add it later — then everything recalculates.
 function lastNightRowHtml(s) {
+  const bed = s.start ? fmtTime(s.start) : '<span class="bed-unknown">?</span>';
   return `
     <div class="sleep-item last-night">
       <div class="dot night"></div>
       <div class="info">
-        <div class="times">${fmtTime(s.start)} → ${fmtTime(s.end)} <span class="next-morn">(last night)</span></div>
+        <div class="times">${bed} → ${fmtTime(s.end)} <span class="next-morn">(last night)</span></div>
+        ${!s.start ? `<div class="sleep-downinfo">🌙 Bedtime not set — tap ✏️ to add it</div>` : ''}
         <div class="meta">
           <span class="badge night">🌙 Last night</span>
           ${(s.interruptions > 0) ? `<span class="sleep-interrupt">· woke ${s.interruptions}×</span>` : ''}
         </div>
         ${s.notes ? `<div class="sleep-note">📝 ${escapeHtml(s.notes)}</div>` : ''}
       </div>
-      <div class="dur">${fmtDur(s.mins)}</div>
+      <div class="dur">${s.start ? fmtDur(s.mins) : ''}</div>
       <button class="edit" onclick="editLastNight('${s.id}','${s.date}')" title="Edit on ${s.date}">✏️</button>
     </div>`;
 }
@@ -828,119 +836,105 @@ function findPendingNight() {
   return loadSleeps().find(s => s.type === 'night' && (s.pending || !s.end)) || null;
 }
 
-// Save from the default night card. Two modes:
-//  • Bedtime only            → pending night for tonight, dated TODAY.
-//  • Bedtime + Woke up given  → last night's completed sleep. The bedtime was
-//    YESTERDAY evening and the wake is THIS morning, so date it to yesterday
-//    (the day it started) — that makes today's morning awake window measure
-//    from the wake time, not the bedtime.
-function logNight() {
-  const start = readTimePicker('bed');
+// Morning: record when the baby woke from LAST night.
+//  • If a bedtime was logged last night (pending night) → complete it.
+//  • Otherwise → create last night's entry dated to YESTERDAY with bedtime
+//    UNKNOWN (blank). You can add the bedtime later today and it recalculates.
+function logMorningWake() {
   const end = readTimePicker('wake');
-  if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
-  const existing = findPendingNight();
-  if (existing) { alert('A night is already in progress (bedtime ' + fmtTime(existing.start) + '). Finish it first.'); return; }
-
+  if (!end) { alert('Please enter the wake-up time (e.g. 07:00).'); return; }
   const wi = document.getElementById('wakeInterrupt');
   const interruptions = Math.max(0, parseInt(wi ? wi.value : 0, 10) || 0);
   const sleeps = loadSleeps();
-
-  if (end) {
-    // completed night — dated to the day it STARTED (yesterday, relative to now)
+  const pending = findPendingNight();
+  if (pending) {
+    const s = sleeps.find(x => x.id === pending.id);
+    if (s) {
+      s.end = end;
+      s.mins = s.start ? durationMins(s.start, end) : 0;
+      s.interruptions = interruptions;
+      s.pending = false;
+    }
+  } else {
+    // no bedtime logged last night — file under yesterday, bedtime unknown
     const startDay = todayISO(new Date(Date.now() - 86400000));
-    const mins = durationMins(start, end);
-    if (mins === 0) { alert('Bedtime and wake time are the same.'); return; }
+    const already = loadSleeps().find(s => s.type === 'night' && s.date === startDay && s.end);
+    if (already) {
+      alert('Last night is already recorded (woke ' + fmtTime(already.end) + '). Edit it in the log to change the wake time.');
+      return;
+    }
     sleeps.push({
       id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
       date: startDay, type: 'night', down: '',
-      start, end, mins, interruptions, notes: '', pending: false
-    });
-  } else {
-    // bedtime only — pending night for tonight, dated today
-    sleeps.push({
-      id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
-      date: todayISO(), type: 'night', down: '',
-      start, end: '', mins: 0, interruptions, notes: '', pending: true
+      start: '', end, mins: 0, interruptions, notes: '', pending: false
     });
   }
   saveSleeps(sleeps);
   render();
 }
 
-// Morning: complete the pending night with a wake time. Keeps its bedtime date.
-function completeNight(wake) {
-  const night = findPendingNight();
-  if (!night) return;
-  const end = wake || readTimePicker('wake');
-  if (!end) { alert('Please enter the wake-up time (e.g. 07:00).'); return; }
-  const mins = durationMins(night.start, end);
-  if (mins === 0) { alert('Bedtime and wake time are the same.'); return; }
-  const interruptions = Math.max(0, parseInt(document.getElementById('wakeInterrupt') ? document.getElementById('wakeInterrupt').value : 0, 10) || 0);
+// Evening: log tonight's bedtime → pending night dated to TODAY.
+function logTonightBedtime() {
+  const start = readTimePicker('bed');
+  if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
+  const existing = findPendingNight();
+  if (existing) { alert('A bedtime is already logged (' + fmtTime(existing.start) + ') and waiting for a wake time. Log the wake first.'); return; }
   const sleeps = loadSleeps();
-  const s = sleeps.find(x => x.id === night.id);
-  if (s) { s.end = end; s.mins = mins; s.interruptions = interruptions; s.pending = false; }
+  sleeps.push({
+    id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
+    date: todayISO(), type: 'night', down: '',
+    start, end: '', mins: 0, interruptions: 0, notes: '', pending: true
+  });
   saveSleeps(sleeps);
   render();
 }
 
-// Paint the night card: morning-complete UI if a night is pending, else Bedtime.
+// Paint the night card. It always leads with the morning wake (you only ever
+// log wake in the morning); bedtime is either already known from last night or
+// added later. A separate section logs tonight's bedtime.
 function renderNightCard() {
   const title = document.getElementById('nightCardTitle');
   const body = document.getElementById('nightCardBody');
   const pending = findPendingNight();
-  if (pending) {
-    title.textContent = '🌅 Good morning';
-    body.innerHTML = `
-      <div class="night-status">Baby went to bed at <b>${fmtTime(pending.start)}</b> last night. When did they wake up?</div>
-      <div class="night-row">
-        <div class="field">
-          <label>Woke up</label>
-          <div class="time-select" id="wakePick"></div>
-        </div>
-        <div class="field" style="flex:0 0 auto">
-          <label>Woke in night</label>
-          <div class="stepper">
-            <button type="button" onclick="bumpWakeInterrupt(-1)">−</button>
-            <input type="number" id="wakeInterrupt" min="0" step="1" value="${pending.interruptions || 0}" inputmode="numeric" style="width:52px">
-            <button type="button" onclick="bumpWakeInterrupt(1)">+</button>
-          </div>
+
+  // status line: what we know about last night's bedtime
+  const bedLine = pending
+    ? `Baby went to bed at <b>${fmtTime(pending.start)}</b> last night. When did they wake?`
+    : `When did the baby wake this morning? You can add last night's bedtime later.`;
+
+  title.textContent = '🌅 Good morning';
+  body.innerHTML = `
+    <div class="night-status">${bedLine}</div>
+    <div class="night-row">
+      <div class="field">
+        <label>Woke up this morning</label>
+        <div class="time-select" id="wakePick"></div>
+      </div>
+      <div class="field" style="flex:0 0 auto">
+        <label>Woke in night</label>
+        <div class="stepper">
+          <button type="button" onclick="bumpWakeInterrupt(-1)">−</button>
+          <input type="number" id="wakeInterrupt" min="0" step="1" value="${pending ? (pending.interruptions || 0) : 0}" inputmode="numeric" style="width:52px">
+          <button type="button" onclick="bumpWakeInterrupt(1)">+</button>
         </div>
       </div>
-      <div class="night-actions">
-        <button class="btn btn-primary" onclick="completeNight()">✓ Save night</button>
-      </div>`;
-    buildTimePicker('wakePick', 'wake', null);
-  } else {
-    // No night in progress. Offer BOTH fields:
-    //  • fill Bedtime only  → pending night for tonight (dates to today)
-    //  • fill Bedtime + Woke → last night's completed sleep (dates to yesterday)
-    title.textContent = '🌙 Night sleep';
-    body.innerHTML = `
-      <div class="night-status">Log <b>bedtime</b> tonight, or enter <b>both</b> times in the morning to record last night.</div>
-      <div class="night-row">
-        <div class="field">
-          <label>Bedtime</label>
-          <div class="time-select" id="bedPick"></div>
-        </div>
-        <div class="field">
-          <label>Woke up <span class="opt">optional</span></label>
-          <div class="time-select" id="wakePick"></div>
-        </div>
-        <div class="field" style="flex:0 0 auto">
-          <label>Woke in night</label>
-          <div class="stepper">
-            <button type="button" onclick="bumpWakeInterrupt(-1)">−</button>
-            <input type="number" id="wakeInterrupt" min="0" step="1" value="0" inputmode="numeric" style="width:52px">
-            <button type="button" onclick="bumpWakeInterrupt(1)">+</button>
-          </div>
-        </div>
+    </div>
+    <div class="night-actions">
+      <button class="btn btn-primary" onclick="logMorningWake()">✓ Save wake time</button>
+    </div>
+    <div class="night-divider"></div>
+    <div class="night-status">Going to sleep now? Log tonight's bedtime — you'll add the wake time tomorrow morning.</div>
+    <div class="night-row">
+      <div class="field">
+        <label>Bedtime tonight</label>
+        <div class="time-select" id="bedPick"></div>
       </div>
-      <div class="night-actions">
-        <button class="btn btn-night" onclick="logNight()">🌙 Save night</button>
-      </div>`;
-    buildTimePicker('bedPick', 'bed', null);
-    buildTimePicker('wakePick', 'wake', null);
-  }
+    </div>
+    <div class="night-actions">
+      <button class="btn btn-night" onclick="logTonightBedtime()">🌙 Log bedtime</button>
+    </div>`;
+  buildTimePicker('wakePick', 'wake', null);
+  buildTimePicker('bedPick', 'bed', null);
 }
 
 function bumpWakeInterrupt(delta) {
@@ -1017,12 +1011,13 @@ function saveEdit(id) {
   const start = readTimePicker('edstart-' + id);
   const end = readTimePicker('edend-' + id);
   const down = readTimePicker('eddown-' + id); // optional
-  const wasPending = s.type === 'night' && (s.pending || !s.end);
 
-  if (!start) { alert('Please enter the ' + (type === 'night' ? 'bedtime.' : 'fell-asleep time.')); return; }
-  // A pending night may be edited before the baby wakes (bedtime only, no wake yet).
-  if (!end && !(type === 'night' && wasPending)) {
-    alert('Please enter both the fell-asleep and woke-up times.'); return;
+  if (type === 'night') {
+    // A night may have only one time known: bedtime pending (no wake yet), or
+    // wake logged with bedtime still unknown. Require at least one.
+    if (!start && !end) { alert('Please enter the bedtime, the wake time, or both.'); return; }
+  } else {
+    if (!start || !end) { alert('Please enter both the fell-asleep and woke-up times.'); return; }
   }
 
   const notes = document.getElementById('ed-notes-' + id).value.trim();
@@ -1032,15 +1027,18 @@ function saveEdit(id) {
 
   s.type = type;
   s.down = down || '';
-  s.start = start;
+  s.start = start || '';
   s.notes = notes;
   s.interruptions = interruptions;
-  if (end) {
+  if (start && end) {
     const mins = durationMins(start, end);
-    if (mins === 0) { alert('Fell-asleep and woke-up times are the same.'); return; }
+    if (mins === 0) { alert('Bedtime and wake time are the same.'); return; }
     s.end = end; s.mins = mins; s.pending = false;
+  } else if (end) {
+    // wake known, bedtime unknown — completed for awake-time purposes
+    s.end = end; s.mins = 0; s.pending = false;
   } else {
-    // still a pending night (bedtime only)
+    // bedtime only — still a pending night awaiting the morning wake
     s.end = ''; s.mins = 0; s.pending = true;
   }
   saveSleeps(sleeps);
