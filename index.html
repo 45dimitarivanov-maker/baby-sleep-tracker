@@ -412,10 +412,37 @@ function todayISO(d = new Date()) {
 }
 
 function loadSleeps() {
-  try { return JSON.parse(localStorage.getItem(LS_SLEEPS)) || []; }
+  let arr;
+  try { arr = JSON.parse(localStorage.getItem(LS_SLEEPS)) || []; }
   catch { return []; }
+  return normalizeNightDates(arr);
 }
 function saveSleeps(arr) { localStorage.setItem(LS_SLEEPS, JSON.stringify(arr)); }
+
+// A night is dated to the day its BEDTIME started. Older data (and entries made
+// before that rule) stored a completed overnight sleep on the WAKE day instead.
+// This one-time migration shifts such nights back to the bedtime day. It is
+// guarded by a per-entry `dnorm` flag AND a global schema version so it runs
+// exactly once per entry — never repeatedly (which would walk the date backwards
+// every load, since an overnight night always has end <= start).
+function normalizeNightDates(arr) {
+  let changed = false;
+  arr.forEach(s => {
+    if (s.type === 'night' && s.start && s.end && !s.pending && !s.dnorm) {
+      const [sh, sm] = s.start.split(':').map(Number);
+      const [eh, em] = s.end.split(':').map(Number);
+      // crosses midnight → wake is on the day AFTER bedtime → shift date back one
+      if (eh * 60 + em <= sh * 60 + sm) {
+        const bedDay = todayISO(new Date(new Date(s.date + 'T00:00:00').getTime() - 86400000));
+        s.date = bedDay;
+        changed = true;
+      }
+      s.dnorm = true; // mark as normalized so it is never shifted again
+    }
+  });
+  if (changed) localStorage.setItem(LS_SLEEPS, JSON.stringify(arr));
+  return arr;
+}
 
 // ---------- Helpers ----------
 function fmtDur(mins) {
@@ -903,6 +930,7 @@ function logMorningWake() {
       s.interruptions = interruptions;
       if (notes) s.notes = notes;
       s.pending = false;
+      s.dnorm = true; // already dated to its bedtime day — never re-shift
     }
   } else {
     // no bedtime logged last night — file under yesterday, bedtime unknown
@@ -915,7 +943,7 @@ function logMorningWake() {
     sleeps.push({
       id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
       date: startDay, type: 'night', down: '',
-      start: '', end, mins: 0, interruptions, notes, pending: false
+      start: '', end, mins: 0, interruptions, notes, pending: false, dnorm: true
     });
   }
   saveSleeps(sleeps);
@@ -1120,6 +1148,7 @@ function saveEdit(id) {
   s.start = start || '';
   s.notes = notes;
   s.interruptions = interruptions;
+  if (type === 'night') s.dnorm = true; // an edited night keeps the date the user chose
   if (start && end) {
     const mins = durationMins(start, end);
     if (mins === 0) { alert('Bedtime and wake time are the same.'); return; }
