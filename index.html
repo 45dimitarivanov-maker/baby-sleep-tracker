@@ -272,9 +272,9 @@
 <div class="wrap">
   <div class="app-title"><span class="app-mark">🌙</span> Baby Sleep Tracker</div>
 
-  <!-- Night sleep: bedtime in the evening, wake next morning -->
+  <!-- Morning: log wake time from last night -->
   <div class="card night-card" id="nightCard">
-    <h2 id="nightCardTitle">🌙 Night sleep</h2>
+    <h2 id="nightCardTitle">🌅 Good morning</h2>
     <div id="nightCardBody"></div>
   </div>
 
@@ -313,6 +313,12 @@
       <textarea id="notesInput" rows="2" placeholder="e.g. fussy before sleep, teething, woke crying…"></textarea>
     </div>
     <button class="btn btn-primary" style="width:100%" onclick="addSleep()">+ Add nap</button>
+  </div>
+
+  <!-- Evening: log tonight's bedtime (after the day's naps) -->
+  <div class="card night-card" id="bedtimeCard">
+    <h2 id="bedtimeCardTitle">🌙 Tonight's bedtime</h2>
+    <div id="bedtimeCardBody"></div>
   </div>
 
   <!-- Sleep log for the day -->
@@ -841,9 +847,28 @@ function editLastNight(id, iso) {
 
 // ---------- Night sleep (bedtime evening → wake next morning) ----------
 
-// The single night entry not yet completed (bedtime logged, no wake). Null if none.
+// The pending night that THIS MORNING's wake should complete: a bedtime that was
+// logged and is still waiting for a wake time, from LAST night. That means it is
+// dated yesterday (bedtime logged in the evening) — or today only if it has no
+// wake yet AND today has no completed night. A bedtime logged for TONIGHT (dated
+// today, meant to be completed tomorrow morning) is deliberately NOT returned
+// here, so completing this morning's wake never overwrites tonight's bedtime.
 function findPendingNight() {
-  return loadSleeps().find(s => s.type === 'night' && (s.pending || !s.end)) || null;
+  const all = loadSleeps();
+  const yest = todayISO(new Date(Date.now() - 86400000));
+  const today = todayISO();
+  // Prefer yesterday's pending night — that is the one you wake from this morning.
+  const yesterdayPending = all.find(s => s.type === 'night' && s.date === yest && (s.pending || !s.end));
+  if (yesterdayPending) return yesterdayPending;
+  // Fall back to a today pending night, but only if today has no completed night
+  // (i.e. this morning's wake has not been recorded yet and no separate bedtime
+  // for tonight is in play). This keeps single-day flows working.
+  const todayCompleted = all.some(s => s.type === 'night' && s.date === today && s.end && !s.pending);
+  if (!todayCompleted) {
+    const todayPending = all.find(s => s.type === 'night' && s.date === today && (s.pending || !s.end));
+    if (todayPending) return todayPending;
+  }
+  return null;
 }
 
 // Morning: record when the baby woke from LAST night.
@@ -855,6 +880,8 @@ function logMorningWake() {
   if (!end) { alert('Please enter the wake-up time (e.g. 07:00).'); return; }
   const wi = document.getElementById('wakeInterrupt');
   const interruptions = Math.max(0, parseInt(wi ? wi.value : 0, 10) || 0);
+  const wn = document.getElementById('wakeNotes');
+  const notes = wn ? wn.value.trim() : '';
   const sleeps = loadSleeps();
   const pending = findPendingNight();
   if (pending) {
@@ -863,6 +890,7 @@ function logMorningWake() {
       s.end = end;
       s.mins = s.start ? durationMins(s.start, end) : 0;
       s.interruptions = interruptions;
+      if (notes) s.notes = notes;
       s.pending = false;
     }
   } else {
@@ -876,39 +904,37 @@ function logMorningWake() {
     sleeps.push({
       id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
       date: startDay, type: 'night', down: '',
-      start: '', end, mins: 0, interruptions, notes: '', pending: false
+      start: '', end, mins: 0, interruptions, notes, pending: false
     });
   }
   saveSleeps(sleeps);
   render();
 }
 
-// Evening: log tonight's bedtime → pending night dated to TODAY.
-// A pending night only counts as tonight's duplicate if today has NO completed
-// night yet. If today already has a completed night (last night's 21:00→07:00
-// dated today) plus a leftover pending row, that pending row is stale — we drop
-// it. Stale pending nights on earlier days are dropped too, so the log self-heals
-// and never blocks you from logging a fresh bedtime.
+// Evening: log tonight's bedtime → ALWAYS a new pending night dated TODAY.
+// This never touches a completed night from a past day, and never reuses an
+// existing row — tonight's bedtime is always its own record. The only thing it
+// guards against is tapping twice the same evening (a today pending with no wake
+// and no completed today night); in that case it points you to edit instead.
 function logTonightBedtime() {
   const start = readTimePicker('bed');
   if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
   const today = todayISO();
   let sleeps = loadSleeps();
 
-  const hasCompletedTonight = sleeps.some(s => s.type === 'night' && s.date === today && s.end && !s.pending);
-  const tonightPending = sleeps.find(s => s.type === 'night' && s.date === today && (s.pending || !s.end));
-
-  // Genuine duplicate: a pending bedtime for tonight, and no completed night has
-  // superseded it. Otherwise the pending row is stale and gets cleaned below.
-  if (tonightPending && !hasCompletedTonight) {
-    alert('A bedtime is already logged for tonight (' + fmtTime(tonightPending.start) + ') and is waiting for tomorrow morning\'s wake time. Edit it in the log if the time is wrong.');
+  // Same-evening double-tap guard: a bedtime for tonight already exists, still
+  // pending, and this morning's night (if any) is separate. Offer to edit it.
+  const todayPendingBedtime = sleeps.find(s =>
+    s.type === 'night' && s.date === today && s.start && (s.pending || !s.end));
+  if (todayPendingBedtime) {
+    alert('Tonight\'s bedtime is already logged (' + fmtTime(todayPendingBedtime.start) + '). Edit it in the log if the time is wrong.');
     return;
   }
 
-  // Self-heal: drop any pending (never-completed) night — a stale leftover from
-  // an earlier day, or a duplicate pending row from today that a completed night
-  // has already replaced. Completed nights (with a wake time) are always kept.
-  sleeps = sleeps.filter(s => !(s.type === 'night' && (s.pending || !s.end) && !s.end));
+  // Self-heal: drop only STALE pending nights from earlier days that never got a
+  // wake and have no bedtime worth keeping. Completed nights (with a wake time)
+  // and this morning's records are always kept.
+  sleeps = sleeps.filter(s => !(s.type === 'night' && s.date !== today && (s.pending || !s.end) && !s.end && !s.start));
 
   sleeps.push({
     id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
@@ -919,12 +945,13 @@ function logTonightBedtime() {
   render();
 }
 
-// Paint the night card. It always leads with the morning wake (you only ever
-// log wake in the morning); bedtime is either already known from last night or
-// added later. A separate section logs tonight's bedtime.
+// Paint the morning-wake card (top) and the tonight's-bedtime card (below the
+// naps). The daily flow reads top→bottom: wake up → add naps → tonight's bedtime.
 function renderNightCard() {
   const title = document.getElementById('nightCardTitle');
   const body = document.getElementById('nightCardBody');
+  const bedTitle = document.getElementById('bedtimeCardTitle');
+  const bedBody = document.getElementById('bedtimeCardBody');
   const pending = findPendingNight();
 
   // status line: what we know about last night's bedtime
@@ -949,22 +976,44 @@ function renderNightCard() {
         </div>
       </div>
     </div>
-    <div class="night-actions">
-      <button class="btn btn-primary" onclick="logMorningWake()">✓ Save wake time</button>
-    </div>
-    <div class="night-divider"></div>
-    <div class="night-status">Going to sleep now? Log tonight's bedtime — you'll add the wake time tomorrow morning.</div>
     <div class="night-row">
-      <div class="field">
-        <label>Bedtime tonight</label>
-        <div class="time-select" id="bedPick"></div>
+      <div class="field" style="flex:1 1 100%">
+        <label>Notes <span class="opt">(optional)</span></label>
+        <input type="text" id="wakeNotes" placeholder="e.g. restless, teething, woke at 3am hungry" value="${pending && pending.notes ? escapeHtml(pending.notes).replace(/"/g, '&quot;') : ''}" style="width:100%">
       </div>
     </div>
     <div class="night-actions">
-      <button class="btn btn-night" onclick="logTonightBedtime()">🌙 Log bedtime</button>
+      <button class="btn btn-primary" onclick="logMorningWake()">✓ Save wake time</button>
     </div>`;
+
+  // Tonight's bedtime card (rendered after naps). If a bedtime for tonight is
+  // already logged and waiting for tomorrow's wake, show that instead of the form.
+  const today = todayISO();
+  const tonight = loadSleeps().find(s =>
+    s.type === 'night' && s.date === today && s.start && (s.pending || !s.end));
+  bedTitle.textContent = '🌙 Tonight\'s bedtime';
+  if (tonight) {
+    bedBody.innerHTML = `
+      <div class="night-status">Bedtime logged for tonight: <b>${fmtTime(tonight.start)}</b>. Tomorrow morning, enter the wake time above to complete it.</div>
+      <div class="night-actions">
+        <button class="btn btn-night" onclick="editLastNight('${tonight.id}','${tonight.date}')">✏️ Edit tonight's bedtime</button>
+      </div>`;
+  } else {
+    bedBody.innerHTML = `
+      <div class="night-status">Going to sleep now? Log tonight's bedtime — you'll add the wake time tomorrow morning.</div>
+      <div class="night-row">
+        <div class="field">
+          <label>Bedtime tonight</label>
+          <div class="time-select" id="bedPick"></div>
+        </div>
+      </div>
+      <div class="night-actions">
+        <button class="btn btn-night" onclick="logTonightBedtime()">🌙 Log bedtime</button>
+      </div>`;
+  }
+
   buildTimePicker('wakePick', 'wake', null);
-  buildTimePicker('bedPick', 'bed', null);
+  if (!tonight) buildTimePicker('bedPick', 'bed', null);
 }
 
 function bumpWakeInterrupt(delta) {
