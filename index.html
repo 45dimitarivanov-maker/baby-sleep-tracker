@@ -668,33 +668,29 @@ function render() {
   renderNightCard();
 
   // sleep list layout (top → bottom):
-  //   1. the night that STARTED this day (bedtime → wake), shown first
+  //   1. last night's completed sleep (bedtime → wake) as morning context
   //   2. the morning awake gap (last night's wake → today's first nap)
   //   3. naps in chronological order, with awake gaps between them
-  // The night is a single event that ends the *next* morning, so it never sits
+  //   4. tonight's bedtime (this day's own night) LAST — it opens the next night
+  // A night is a single event that ends the next morning, so it never sits
   // "between" naps — drawing a nap→night gap is meaningless (that was the old
   // 10h55m bug). We only draw awake windows across the daytime timeline.
   const list = document.getElementById('sleepList');
   const napList = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
-  const nightEntry = sleeps.find(s => s.type === 'night');
-  // The morning wake that feeds today's daytime awake window: prefer the night
-  // that STARTED today (its wake is this morning); else last night's (prevNight/
-  // prevWake). If today's night is still pending (no wake yet), fall back too.
-  const morningWake = (nightEntry && nightEntry.end && !nightEntry.pending)
-    ? nightEntry.end
-    : (prevNight ? prevNight.end : prevWake);
+  // this day's OWN night = tonight's bedtime (dated today), shown LAST
+  const tonightEntry = sleeps.find(s => s.type === 'night');
+  // The morning wake that feeds today's daytime awake window comes from LAST
+  // night (prevNight / prevWake). Tonight's own bedtime doesn't have a wake yet.
+  const morningWake = prevNight ? prevNight.end : prevWake;
   if (sleeps.length === 0 && !prevNight) {
     list.innerHTML = '<div class="empty"><span class="emo">🛌</span>No sleeps logged for this day yet.<br>Add one above to get started.</div>';
   } else {
     let html = '';
-    // 1. Night first. Prefer this day's own night; otherwise show last night's
-    //    completed sleep (from yesterday) as read-only morning context.
-    if (nightEntry) {
-      html += (nightEntry.id === editingId) ? editFormHtml(nightEntry) : sleepRowHtml(nightEntry);
-    } else if (prevNight) {
+    // 1. Last night's completed sleep (from yesterday) as read-only morning context.
+    if (prevNight) {
       html += lastNightRowHtml(prevNight);
     }
-    // 2. Morning awake gap: from the wake time to the first nap.
+    // 2. Morning awake gap: from last night's wake to the first nap.
     if (morningWake && napList.length) {
       const g = awakeGapMins(morningWake, napList[0].start);
       if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
@@ -707,6 +703,18 @@ function render() {
         if (gap != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
       }
     });
+    // 4. Tonight's bedtime LAST. If there was a daytime awake window before it,
+    //    show the gap from the last nap to bedtime.
+    if (tonightEntry) {
+      if (napList.length && tonightEntry.start) {
+        const lastNap = napList[napList.length - 1];
+        if (lastNap.end) {
+          const g = awakeGapMins(lastNap.end, tonightEntry.start);
+          if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
+        }
+      }
+      html += (tonightEntry.id === editingId) ? editFormHtml(tonightEntry) : sleepRowHtml(tonightEntry);
+    }
     list.innerHTML = html;
     // populate the time inputs for any row being edited
     sleeps.forEach(s => {
