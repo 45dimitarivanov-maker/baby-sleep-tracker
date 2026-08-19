@@ -677,8 +677,11 @@ function render() {
   // 10h55m bug). We only draw awake windows across the daytime timeline.
   const list = document.getElementById('sleepList');
   const napList = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
-  // this day's OWN night = tonight's bedtime (dated today), shown LAST
-  const tonightEntry = sleeps.find(s => s.type === 'night');
+  // ALL of this day's own nights (there can be more than one dated today, e.g. a
+  // completed night plus tonight's pending bedtime). Render every one — never
+  // just the first — so a newly logged bedtime can't be silently hidden.
+  const dayNights = sleeps.filter(s => s.type === 'night')
+    .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
   // The morning wake that feeds today's daytime awake window comes from LAST
   // night (prevNight / prevWake). Tonight's own bedtime doesn't have a wake yet.
   const morningWake = prevNight ? prevNight.end : prevWake;
@@ -703,18 +706,18 @@ function render() {
         if (gap != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
       }
     });
-    // 4. Tonight's bedtime LAST. If there was a daytime awake window before it,
-    //    show the gap from the last nap to bedtime.
-    if (tonightEntry) {
-      if (napList.length && tonightEntry.start) {
+    // 4. This day's own night(s) LAST — bedtime opens the next night. Show an
+    //    awake gap from the last nap to the first (earliest) bedtime.
+    dayNights.forEach((n, i) => {
+      if (i === 0 && napList.length && n.start) {
         const lastNap = napList[napList.length - 1];
         if (lastNap.end) {
-          const g = awakeGapMins(lastNap.end, tonightEntry.start);
+          const g = awakeGapMins(lastNap.end, n.start);
           if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
         }
       }
-      html += (tonightEntry.id === editingId) ? editFormHtml(tonightEntry) : sleepRowHtml(tonightEntry);
-    }
+      html += (n.id === editingId) ? editFormHtml(n) : sleepRowHtml(n);
+    });
     list.innerHTML = html;
     // populate the time inputs for any row being edited
     sleeps.forEach(s => {
