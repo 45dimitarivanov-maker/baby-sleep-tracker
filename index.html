@@ -886,6 +886,7 @@ function lastNightRowHtml(s) {
       <div class="info">
         <div class="times">${bed} → ${fmtTime(s.end)} <span class="next-morn">(last night)</span></div>
         ${!s.start ? `<div class="sleep-downinfo">🌙 Bedtime not set — tap ✏️ to add it</div>` : ''}
+        ${(s.down && s.start) ? `<div class="sleep-downinfo">🛏️ Put down ${fmtTime(s.down)}${settleMins(s.down, s.start) != null ? ` · fell asleep in ${fmtDur(settleMins(s.down, s.start))}` : ''}</div>` : ''}
         <div class="meta">
           <span class="badge night">🌙 Last night</span>
           ${(s.interruptions > 0) ? `<span class="sleep-interrupt">· woke ${s.interruptions}×</span>` : ''}
@@ -979,6 +980,7 @@ function logMorningWake() {
 function logTonightBedtime() {
   const start = readTimePicker('bed');
   if (!start) { alert('Please enter the bedtime (e.g. 21:00).'); return; }
+  const down = readTimePicker('bedDown') || '';
   const today = todayISO();
   let sleeps = loadSleeps();
 
@@ -998,7 +1000,7 @@ function logTonightBedtime() {
 
   sleeps.push({
     id: Date.now() + '-' + Math.floor(performance.now() * 1000 % 100000),
-    date: today, type: 'night', down: '',
+    date: today, type: 'night', down,
     start, end: '', mins: 0, interruptions: 0, notes: '', pending: true
   });
   saveSleeps(sleeps);
@@ -1063,7 +1065,11 @@ function renderNightCard() {
       <div class="night-status">Going to sleep now? Log tonight's bedtime — you'll add the wake time tomorrow morning.</div>
       <div class="night-row">
         <div class="field">
-          <label>Bedtime tonight</label>
+          <label>Put down <span class="opt">(optional)</span></label>
+          <div class="time-select" id="bedDownPick"></div>
+        </div>
+        <div class="field">
+          <label>Fell asleep</label>
           <div class="time-select" id="bedPick"></div>
         </div>
       </div>
@@ -1073,7 +1079,10 @@ function renderNightCard() {
   }
 
   buildTimePicker('wakePick', 'wake', null);
-  if (!tonight) buildTimePicker('bedPick', 'bed', null);
+  if (!tonight) {
+    buildTimePicker('bedDownPick', 'bedDown', null);
+    buildTimePicker('bedPick', 'bed', null);
+  }
 }
 
 function bumpWakeInterrupt(delta) {

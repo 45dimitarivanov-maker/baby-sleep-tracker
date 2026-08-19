@@ -7,7 +7,7 @@ A simple, single-file web app to track a baby's naps, night sleep, and awake tim
 ## Features
 
 - **Quick nap entry** — Log naps with optional "put down" / "fell asleep" / "woke up" times. Naps that cross midnight are handled automatically.
-- **Night sleep, split across the evening and morning** — The day reads top to bottom: **Good morning** (enter the wake time, night interruptions, and any notes to complete last night's sleep) → **Add a nap** → **Tonight's bedtime** (log when the baby goes down; you'll add the wake time tomorrow morning). Each night is its own record — logging tonight's bedtime never overwrites a past night. A night counts toward the day it *started*.
+- **Night sleep, split across the evening and morning** — The day reads top to bottom: **Good morning** (enter the wake time, night interruptions, and any notes to complete last night's sleep) → **Add a nap** → **Tonight's bedtime** (log an optional "put down" time and when the baby fell asleep; you'll add the wake time tomorrow morning). Each night is its own record — logging tonight's bedtime never overwrites a past night. A night counts toward the day it *started*.
 - **Timeline layout** — Each day shows the night sleep first (bedtime → wake), then the naps in chronological order below it.
 - **Daily dashboard** — Total sleep, awake time, night sleep, and day naps for any day, with day-to-day navigation.
 - **Editable sleep log** — Edit or delete any logged sleep inline, including a night that's still in progress.
