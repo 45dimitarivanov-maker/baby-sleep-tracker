@@ -672,11 +672,17 @@ function render() {
   const pn = nightForDay(prevDay);
   const prevNight = (pn && pn.end && !pn.pending) ? pn : null;
 
-  let nightMins = 0, dayMins = 0, naps = 0;
+  // Night sleep FOR this day = the night that was slept THROUGH this day's
+  // morning, i.e. the one dated to the previous evening (bedtime yesterday →
+  // wake today). That is `prevNight`, shown as the top "last night" row. Nights
+  // dated to `viewDate` itself are tonight's freshly-logged bedtime — still
+  // pending, no duration yet — so they must NOT count here (that showed 0m and
+  // hid the real 11h).
+  let dayMins = 0, naps = 0;
   sleeps.forEach(s => {
-    if (s.type === 'night') nightMins += s.mins;
-    else { dayMins += s.mins; naps++; }
+    if (s.type !== 'night') { dayMins += s.mins; naps++; }
   });
+  const nightMins = prevNight ? prevNight.mins : 0;
   const totalMins = nightMins + dayMins;
   // Awake time = the KNOWN daytime gaps (this morning's wake → naps). The morning
   // wake comes from today's own completed night, else last night's wake.
