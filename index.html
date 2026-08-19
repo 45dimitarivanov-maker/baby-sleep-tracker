@@ -799,18 +799,21 @@ function prevNightWake(iso) {
 }
 
 // KNOWN awake time for a day = the daytime windows only:
-//   (this morning's wake) → first nap → … → last nap
+//   (this morning's wake) → first nap → … → last nap → (tonight's bedtime)
 // The morning wake comes from whichever night ended this morning: today's own
 // night if it's completed (bedtime yesterday-evening → wake today), otherwise
-// the previous day's night (`prevNightEnd`). We do NOT add a "last nap → tonight's
-// bedtime" window: bedtime opens the *next* night, not a same-day awake gap, and
-// counting it produced nonsensical values (e.g. 10h55m from a nap end to 21:00).
+// the previous day's night (`prevNightEnd`). The trailing window (last nap →
+// tonight's bedtime) is counted only when THIS day started a night whose bedtime
+// is known — that bedtime is a real same-day event, so the gap is meaningful.
 function trackedAwakeMins(sleeps, prevNightEnd) {
   const naps = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
-  const night = sleeps.find(s => s.type === 'night');
-  // morning wake: this day's own completed night wakes this morning; else use
-  // the previous night's wake passed in.
-  const morningWake = (night && night.end && !night.pending) ? night.end : prevNightEnd;
+  const nights = sleeps.filter(s => s.type === 'night').sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  // The morning wake belongs to the night that ENDED this morning: today's own
+  // night only if it's completed (a rare same-day log), else last night's wake.
+  const completedToday = nights.find(n => n.end && !n.pending);
+  const morningWake = (completedToday && completedToday.end) ? completedToday.end : prevNightEnd;
+  // Tonight's bedtime: the earliest night STARTED today that has a bedtime.
+  const tonight = nights.find(n => n.start);
   let total = 0;
   if (morningWake && naps.length) {
     const g = awakeGapMins(morningWake, naps[0].start);
@@ -818,6 +821,18 @@ function trackedAwakeMins(sleeps, prevNightEnd) {
   }
   for (let i = 0; i < naps.length - 1; i++) {
     const g = awakeGapMins(naps[i].end, naps[i + 1].start);
+    if (g != null) total += g;
+  }
+  // Last nap → tonight's bedtime (both known clock times, same day).
+  if (tonight && tonight.start && naps.length) {
+    const lastNap = naps[naps.length - 1];
+    if (lastNap.end) {
+      const g = awakeGapMins(lastNap.end, tonight.start);
+      if (g != null) total += g;
+    }
+  } else if (tonight && tonight.start && !naps.length && morningWake) {
+    // No naps at all: awake straight from morning wake to tonight's bedtime.
+    const g = awakeGapMins(morningWake, tonight.start);
     if (g != null) total += g;
   }
   return total;
