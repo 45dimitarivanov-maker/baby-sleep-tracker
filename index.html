@@ -153,6 +153,14 @@
   }
   .date-nav .date-label { font-weight: 700; font-size: 16px; text-align: center; flex: 1; }
   .date-nav .date-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+  /* Jump back to today — a compact pill, only shown on past days */
+  .today-jump {
+    width: auto !important; height: 40px; padding: 0 14px;
+    border: 1px solid var(--primary); background: var(--primary-soft); color: var(--primary);
+    border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+    font-family: inherit; white-space: nowrap;
+  }
+  .today-jump:hover { filter: brightness(.98); }
   /* Stats */
   .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .stat {
@@ -264,6 +272,38 @@
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .opt { font-weight: 400; color: var(--muted); font-size: 11px; }
   .sleep-downinfo { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  /* Multi-day history overlay */
+  #historyOverlay {
+    position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    overflow-y: auto; display: none;
+  }
+  #historyOverlay.open { display: block; }
+  body.history-open { overflow: hidden; }
+  .history-inner { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .history-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: 6px 2px 14px;
+  }
+  .history-title { font-size: 18px; font-weight: 800; letter-spacing: -.3px; color: var(--ink); }
+  .history-close {
+    width: 40px; height: 40px; flex: 0 0 auto; border: 1px solid var(--line);
+    background: #fff; border-radius: 10px; font-size: 18px; cursor: pointer; color: var(--ink);
+  }
+  .history-close:hover { background: var(--primary-soft); color: var(--primary); }
+  .history-picker { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 16px; }
+  .history-day { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 14px; }
+  .history-day .hd-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .history-day .hd-head .hd-title { font-size: 15px; font-weight: 800; color: var(--ink); }
+  .history-day .hd-head .hd-sub { font-size: 12px; color: var(--muted); }
+  /* Compact per-day stat strip (Total / Night / Day / Awake) */
+  .hd-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .hd-stat { border-radius: 10px; padding: 8px 6px; text-align: center; }
+  .hd-stat .v { font-size: 16px; font-weight: 800; letter-spacing: -.3px; }
+  .hd-stat .l { font-size: 10px; font-weight: 600; margin-top: 1px; opacity: .8; }
+  .hd-stat.total { background: var(--total-soft); color: var(--total); }
+  .hd-stat.night { background: var(--night-soft); color: var(--night); }
+  .hd-stat.day { background: var(--day-soft); color: var(--day); }
+  .hd-stat.wake { background: var(--wake-soft); color: var(--wake); }
   .footer { text-align: center; font-size: 12px; color: var(--muted); padding: 8px 0 24px; }
 </style>
 </head>
@@ -325,7 +365,10 @@
   <div class="card">
     <div class="card-head">
       <h2>Sleep log</h2>
-      <button class="btn-sm" id="copyYesterdayBtn" onclick="copyFromYesterday()">📋 Copy from yesterday</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-sm" onclick="openHistory()">📅 View history</button>
+        <button class="btn-sm" id="copyYesterdayBtn" onclick="copyFromYesterday()">📋 Copy from yesterday</button>
+      </div>
     </div>
     <div id="sleepList"></div>
   </div>
@@ -335,6 +378,7 @@
     <div class="date-nav">
       <button onclick="changeDay(-1)">‹</button>
       <div class="date-label" id="dateLabel">Today<div class="date-sub" id="dateSub"></div></div>
+      <button class="today-jump" id="todayBtn" onclick="goToToday()" style="display:none">Today</button>
       <button onclick="changeDay(1)" id="nextBtn">›</button>
     </div>
 
@@ -395,6 +439,25 @@
   </div>
 
   <div class="footer">Data is saved locally on this device only.</div>
+</div>
+
+<!-- Multi-day sleep history (full-screen overlay) -->
+<div id="historyOverlay">
+  <div class="history-inner">
+    <div class="history-head">
+      <div class="history-title">📅 Sleep history</div>
+      <button class="history-close" onclick="closeHistory()" title="Close">✕</button>
+    </div>
+    <div class="period-slider history-picker">
+      <div class="slider-head">
+        <span>Show last</span>
+        <span class="slider-val"><span id="historyVal">5</span> days</span>
+      </div>
+      <input type="range" id="historyRange" min="1" max="30" value="5" step="1" oninput="setHistoryDays(Number(this.value))">
+      <div class="slider-scale"><span>1</span><span>30</span></div>
+    </div>
+    <div id="historyBody"></div>
+  </div>
 </div>
 
 <script>
@@ -662,34 +725,14 @@ function render() {
   else if (viewDate === yesterday) head = 'Yesterday';
   dLabel.innerHTML = head + '<div class="date-sub">' + nice + '</div>';
   document.getElementById('nextBtn').style.visibility = (viewDate >= today) ? 'hidden' : 'visible';
+  // "Today" jump appears only when viewing a past day (out of the way on today).
+  document.getElementById('todayBtn').style.display = (viewDate < today) ? 'inline-block' : 'none';
 
-  // sleeps for the day, ordered along the real timeline (naps first, then the
-  // night that started this evening). A night is dated to its bedtime day.
+  // sleeps for the day (used only to populate inline-edit time pickers below).
   const sleeps = orderByWake(loadSleeps().filter(s => s.date === viewDate));
-  const prevWake = prevNightWake(viewDate); // last night's wake feeds this morning
-  // full completed night from yesterday, shown as the top row for morning context
-  const prevDay = todayISO(new Date(new Date(viewDate + 'T00:00:00').getTime() - 86400000));
-  const pn = nightForDay(prevDay);
-  const prevNight = (pn && pn.end && !pn.pending) ? pn : null;
 
-  // Night sleep FOR this day = the night that was slept THROUGH this day's
-  // morning, i.e. the one dated to the previous evening (bedtime yesterday →
-  // wake today). That is `prevNight`, shown as the top "last night" row. Nights
-  // dated to `viewDate` itself are tonight's freshly-logged bedtime — still
-  // pending, no duration yet — so they must NOT count here (that showed 0m and
-  // hid the real 11h).
-  let dayMins = 0, naps = 0;
-  sleeps.forEach(s => {
-    if (s.type !== 'night') { dayMins += s.mins; naps++; }
-  });
-  const nightMins = prevNight ? prevNight.mins : 0;
-  const totalMins = nightMins + dayMins;
-  // Awake time = the KNOWN daytime gaps (this morning's wake → naps). The morning
-  // wake comes from today's own completed night, else last night's wake.
-  const wakeMins = trackedAwakeMins(sleeps, prevWake);
-  const todayNight = sleeps.find(s => s.type === 'night');
-  const morningWakeKnown = (todayNight && todayNight.end && !todayNight.pending) || !!prevWake;
-  const awakeKnown = (morningWakeKnown && naps > 0) || naps >= 2;
+  // Per-day aggregates (night/day/total/awake) for this day, reused by the tiles.
+  const { nightMins, dayMins, totalMins, wakeMins, naps, awakeKnown } = dayAggregates(viewDate);
 
   document.getElementById('statTotal').textContent = fmtDur(totalMins);
   document.getElementById('statNight').textContent = fmtDur(nightMins);
@@ -700,67 +743,19 @@ function render() {
   // the night card (bedtime / morning-complete) always reflects state
   renderNightCard();
 
-  // sleep list layout (top → bottom):
-  //   1. last night's completed sleep (bedtime → wake) as morning context
-  //   2. the morning awake gap (last night's wake → today's first nap)
-  //   3. naps in chronological order, with awake gaps between them
-  //   4. tonight's bedtime (this day's own night) LAST — it opens the next night
-  // A night is a single event that ends the next morning, so it never sits
-  // "between" naps — drawing a nap→night gap is meaningless (that was the old
-  // 10h55m bug). We only draw awake windows across the daytime timeline.
+  // sleep list layout is built by the shared dayLogRowsHtml() helper so the
+  // daily view and the multi-day history overlay stay in lockstep. Here we render
+  // it editable (✏️/✕ live); history renders it read-only.
   const list = document.getElementById('sleepList');
-  const napList = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
-  // ALL of this day's own nights (there can be more than one dated today, e.g. a
-  // completed night plus tonight's pending bedtime). Render every one — never
-  // just the first — so a newly logged bedtime can't be silently hidden.
-  const dayNights = sleeps.filter(s => s.type === 'night')
-    .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
-  // The morning wake that feeds today's daytime awake window comes from LAST
-  // night (prevNight / prevWake). Tonight's own bedtime doesn't have a wake yet.
-  const morningWake = prevNight ? prevNight.end : prevWake;
-  if (sleeps.length === 0 && !prevNight) {
-    list.innerHTML = '<div class="empty"><span class="emo">🛌</span>No sleeps logged for this day yet.<br>Add one above to get started.</div>';
-  } else {
-    let html = '';
-    // 1. Last night's completed sleep (from yesterday) as read-only morning context.
-    if (prevNight) {
-      html += lastNightRowHtml(prevNight);
+  list.innerHTML = dayLogRowsHtml(viewDate, false);
+  // populate the time inputs for any row being edited (daily view only)
+  sleeps.forEach(s => {
+    if (s.id === editingId) {
+      buildTimePicker('eddown-' + s.id, 'eddown-' + s.id, s.down || null);
+      buildTimePicker('edstart-' + s.id, 'edstart-' + s.id, s.start);
+      buildTimePicker('edend-' + s.id, 'edend-' + s.id, s.end || null);
     }
-    // 2. Morning awake gap: from last night's wake to the first nap.
-    if (morningWake && napList.length) {
-      const g = awakeGapMins(morningWake, napList[0].start);
-      if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
-    }
-    // 3. Naps, chronological, with awake gaps between consecutive naps.
-    napList.forEach((s, i) => {
-      html += (s.id === editingId) ? editFormHtml(s) : sleepRowHtml(s);
-      if (i < napList.length - 1 && s.end) {
-        const gap = awakeGapMins(s.end, napList[i + 1].start);
-        if (gap != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
-      }
-    });
-    // 4. This day's own night(s) LAST — bedtime opens the next night. Show an
-    //    awake gap from the last nap to the first (earliest) bedtime.
-    dayNights.forEach((n, i) => {
-      if (i === 0 && napList.length && n.start) {
-        const lastNap = napList[napList.length - 1];
-        if (lastNap.end) {
-          const g = awakeGapMins(lastNap.end, n.start);
-          if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
-        }
-      }
-      html += (n.id === editingId) ? editFormHtml(n) : sleepRowHtml(n);
-    });
-    list.innerHTML = html;
-    // populate the time inputs for any row being edited
-    sleeps.forEach(s => {
-      if (s.id === editingId) {
-        buildTimePicker('eddown-' + s.id, 'eddown-' + s.id, s.down || null);
-        buildTimePicker('edstart-' + s.id, 'edstart-' + s.id, s.start);
-        buildTimePicker('edend-' + s.id, 'edend-' + s.id, s.end || null);
-      }
-    });
-  }
+  });
 
   // enable "copy from yesterday" only if the previous day has sleeps
   const prev = todayISO(new Date(new Date(viewDate + 'T00:00:00').getTime() - 86400000));
@@ -770,6 +765,155 @@ function render() {
   copyBtn.title = prevCount === 0 ? 'No sleeps on the previous day' : `Copy ${prevCount} sleep${prevCount === 1 ? '' : 's'} from the previous day`;
 
   renderStats();
+}
+
+// Human date heading for a day key: "Today" / "Yesterday" / "Monday, Aug 24".
+function dateHeading(dk) {
+  const today = todayISO();
+  const yesterday = todayISO(new Date(Date.now() - 86400000));
+  const nice = new Date(dk + 'T00:00:00')
+    .toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  if (dk === today) return { head: 'Today', sub: nice };
+  if (dk === yesterday) return { head: 'Yesterday', sub: nice };
+  return { head: nice, sub: '' };
+}
+
+// The completed night that was slept THROUGH `dk`'s morning: it is dated to the
+// PREVIOUS evening (bedtime yesterday → wake today). Null if not completed.
+function prevCompletedNight(dk) {
+  const prevDay = todayISO(new Date(new Date(dk + 'T00:00:00').getTime() - 86400000));
+  const pn = nightForDay(prevDay);
+  return (pn && pn.end && !pn.pending) ? pn : null;
+}
+
+// Per-day aggregates shared by the daily tiles and the history overlay. Night
+// sleep = the night slept through this morning (dated the previous evening);
+// day = sum of naps; awake = tracked daytime gaps. Mirrors the rules that used
+// to live inline in render() and renderStats().
+function dayAggregates(dk) {
+  const sleeps = orderByWake(loadSleeps().filter(s => s.date === dk));
+  const prevWake = prevNightWake(dk);
+  const prevNight = prevCompletedNight(dk);
+  let dayMins = 0, naps = 0;
+  sleeps.forEach(s => { if (s.type !== 'night') { dayMins += s.mins; naps++; } });
+  const nightMins = prevNight ? prevNight.mins : 0;
+  const totalMins = nightMins + dayMins;
+  const wakeMins = trackedAwakeMins(sleeps, prevWake);
+  const todayNight = sleeps.find(s => s.type === 'night');
+  const morningWakeKnown = (todayNight && todayNight.end && !todayNight.pending) || !!prevWake;
+  const awakeKnown = (morningWakeKnown && naps > 0) || naps >= 2;
+  return { sleeps, prevWake, prevNight, nightMins, dayMins, totalMins, wakeMins, naps, awakeKnown };
+}
+
+// Build the sleep-log rows for one day (top → bottom):
+//   1. last night's completed sleep (bedtime → wake) as morning context
+//   2. the morning awake gap (last night's wake → today's first nap)
+//   3. naps in chronological order, with awake gaps between them
+//   4. this day's own night(s) LAST — bedtime opens the next night
+// A night is a single event that ends the next morning, so it never sits
+// "between" naps. `readOnly` (history overlay) drops the inline edit form and
+// the ✏️/✕ controls; the daily view passes readOnly=false so editing works.
+function dayLogRowsHtml(dk, readOnly) {
+  const sleeps = orderByWake(loadSleeps().filter(s => s.date === dk));
+  const prevNight = prevCompletedNight(dk);
+  const prevWake = prevNightWake(dk);
+  const napList = sleeps.filter(s => s.type !== 'night').sort((a, b) => a.start.localeCompare(b.start));
+  // ALL of this day's own nights (there can be more than one dated today, e.g. a
+  // completed night plus tonight's pending bedtime). Render every one.
+  const dayNights = sleeps.filter(s => s.type === 'night')
+    .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  // The morning wake that feeds this day's daytime awake window comes from LAST
+  // night. Tonight's own bedtime doesn't have a wake yet.
+  const morningWake = prevNight ? prevNight.end : prevWake;
+
+  if (sleeps.length === 0 && !prevNight) {
+    return readOnly
+      ? '<div class="empty" style="padding:12px">No sleeps logged.</div>'
+      : '<div class="empty"><span class="emo">🛌</span>No sleeps logged for this day yet.<br>Add one above to get started.</div>';
+  }
+
+  // In read-only mode never show the inline edit form for the row being edited.
+  const rowFor = s => (!readOnly && s.id === editingId) ? editFormHtml(s)
+    : (readOnly ? sleepRowHtml(s, true) : sleepRowHtml(s));
+
+  let html = '';
+  // 1. Last night's completed sleep (from yesterday) as morning context.
+  if (prevNight) html += lastNightRowHtml(prevNight, readOnly);
+  // 2. Morning awake gap: from last night's wake to the first nap.
+  if (morningWake && napList.length) {
+    const g = awakeGapMins(morningWake, napList[0].start);
+    if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
+  }
+  // 3. Naps, chronological, with awake gaps between consecutive naps.
+  napList.forEach((s, i) => {
+    html += rowFor(s);
+    if (i < napList.length - 1 && s.end) {
+      const gap = awakeGapMins(s.end, napList[i + 1].start);
+      if (gap != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(gap)}</div>`;
+    }
+  });
+  // 4. This day's own night(s) LAST — bedtime opens the next night.
+  dayNights.forEach((n, i) => {
+    if (i === 0 && napList.length && n.start) {
+      const lastNap = napList[napList.length - 1];
+      if (lastNap.end) {
+        const g = awakeGapMins(lastNap.end, n.start);
+        if (g != null) html += `<div class="awake-gap"><span class="line"></span>😊 Awake ${fmtDur(g)}</div>`;
+      }
+    }
+    html += rowFor(n);
+  });
+  return html;
+}
+
+// Jump straight back to today from any past day.
+function goToToday() { viewDate = todayISO(); render(); }
+
+// ---------- Multi-day history overlay ----------
+let historyDays = 5; // default; user adjusts via the slider
+
+function openHistory() {
+  document.getElementById('historyOverlay').classList.add('open');
+  document.body.classList.add('history-open');
+  renderHistory();
+}
+function closeHistory() {
+  document.getElementById('historyOverlay').classList.remove('open');
+  document.body.classList.remove('history-open');
+}
+function setHistoryDays(n) {
+  historyDays = n;
+  document.getElementById('historyVal').textContent = n;
+  const r = document.getElementById('historyRange');
+  if (Number(r.value) !== n) r.value = n;
+  renderHistory();
+}
+
+// Render the last `historyDays` calendar days, newest first (Today at top).
+// Each day gets a compact stat strip and its full read-only sleep log, built by
+// the same dayAggregates()/dayLogRowsHtml() path the daily view uses.
+function renderHistory() {
+  let html = '';
+  for (let i = 0; i < historyDays; i++) {
+    const dk = todayISO(new Date(Date.now() - i * 86400000));
+    const { nightMins, dayMins, totalMins, wakeMins, naps, awakeKnown } = dayAggregates(dk);
+    const { head, sub } = dateHeading(dk);
+    html += `
+      <div class="history-day">
+        <div class="hd-head">
+          <span class="hd-title">${head}</span>
+          ${sub ? `<span class="hd-sub">${sub}</span>` : ''}
+        </div>
+        <div class="hd-stats">
+          <div class="hd-stat total"><div class="v">${fmtDur(totalMins)}</div><div class="l">Total</div></div>
+          <div class="hd-stat night"><div class="v">${fmtDur(nightMins)}</div><div class="l">Night</div></div>
+          <div class="hd-stat day"><div class="v">${fmtDur(dayMins)}</div><div class="l">${naps} nap${naps === 1 ? '' : 's'}</div></div>
+          <div class="hd-stat wake"><div class="v">${awakeKnown ? fmtDur(wakeMins) : '—'}</div><div class="l">Awake</div></div>
+        </div>
+        ${dayLogRowsHtml(dk, true)}
+      </div>`;
+  }
+  document.getElementById('historyBody').innerHTML = html;
 }
 
 // Awake minutes between one clock time and a later one ("HH:MM" each).
@@ -847,7 +991,7 @@ function trackedAwakeMins(sleeps, prevNightEnd) {
 // One row in the sleep log. A night spans into the next morning, so label its
 // times "21:00 → 07:00 (next morning)"; a pending night shows "still asleep".
 // Bedtime may be unknown (blank) if only the wake was logged — show "?".
-function sleepRowHtml(s) {
+function sleepRowHtml(s, readOnly) {
   const isNight = s.type === 'night';
   const pending = isNight && (s.pending || !s.end);
   const bed = s.start ? fmtTime(s.start) : '<span class="bed-unknown">?</span>';
@@ -855,6 +999,9 @@ function sleepRowHtml(s) {
     ? `${bed} → <span class="pending-wake">still asleep…</span>`
     : `${bed} → ${fmtTime(s.end)}${isNight ? ' <span class="next-morn">(next morning)</span>' : ''}`;
   const durHtml = (pending || (isNight && !s.start)) ? '' : fmtDur(s.mins);
+  const controls = readOnly ? '' : `
+      <button class="edit" onclick="startEdit('${s.id}')" title="Edit">✏️</button>
+      <button class="del" onclick="deleteSleep('${s.id}')" title="Delete">✕</button>`;
   return `
     <div class="sleep-item">
       <div class="dot ${s.type}"></div>
@@ -868,9 +1015,7 @@ function sleepRowHtml(s) {
         </div>
         ${s.notes ? `<div class="sleep-note">📝 ${escapeHtml(s.notes)}</div>` : ''}
       </div>
-      <div class="dur">${durHtml}</div>
-      <button class="edit" onclick="startEdit('${s.id}')" title="Edit">✏️</button>
-      <button class="del" onclick="deleteSleep('${s.id}')" title="Delete">✕</button>
+      <div class="dur">${durHtml}</div>${controls}
     </div>`;
 }
 
@@ -878,8 +1023,10 @@ function sleepRowHtml(s) {
 // morning context (bedtime → wake). It's stored on yesterday, so editing it
 // jumps back to that day; there's no delete here to avoid confusion. Bedtime
 // may be unknown ("?") until you add it later — then everything recalculates.
-function lastNightRowHtml(s) {
+function lastNightRowHtml(s, readOnly) {
   const bed = s.start ? fmtTime(s.start) : '<span class="bed-unknown">?</span>';
+  const controls = readOnly ? '' :
+    `<button class="edit" onclick="editLastNight('${s.id}','${s.date}')" title="Edit on ${s.date}">✏️</button>`;
   return `
     <div class="sleep-item last-night">
       <div class="dot night"></div>
@@ -894,7 +1041,7 @@ function lastNightRowHtml(s) {
         ${s.notes ? `<div class="sleep-note">📝 ${escapeHtml(s.notes)}</div>` : ''}
       </div>
       <div class="dur">${s.start ? fmtDur(s.mins) : ''}</div>
-      <button class="edit" onclick="editLastNight('${s.id}','${s.date}')" title="Edit on ${s.date}">✏️</button>
+      ${controls}
     </div>`;
 }
 
